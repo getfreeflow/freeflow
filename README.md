@@ -3,6 +3,8 @@
 Voice dictation for macOS that runs on your own machine. Hold a key, talk, and the text
 appears wherever your cursor is.
 
+**[getfreeflow.github.io/freeflow](https://getfreeflow.github.io/freeflow/)**
+
 Transcription happens locally with a Whisper model. No audio leaves your Mac, there's no
 account, and nothing is metered. An optional cleanup pass turns the raw transcript into text
 you can actually send, using an API key you supply.
