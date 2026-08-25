@@ -1,0 +1,20 @@
+// Code signing.
+//
+// "-" is ad-hoc signing: it needs no setup and builds anywhere, which is why it
+// is the default here. The cost is that an ad-hoc signature is a hash of the
+// binary's contents, so it changes on every build — and macOS identifies apps to
+// TCC (Accessibility, Input Monitoring, Microphone) by that hash. Every rebuild
+// therefore looks like a brand new app, and the permissions you granted are
+// attached to a build that no longer exists. The toggles stay lit in System
+// Settings while the running app is denied.
+//
+// Signing with a certificate instead swaps that hash for the certificate's, which
+// never changes. Grant the permissions once and they hold across every rebuild.
+//
+// To switch, create a local certificate and point at it from an untracked file —
+// see "Making permissions stick" in the README. Nothing personal is committed.
+
+CODE_SIGN_IDENTITY = -
+
+// Optional and untracked. If it doesn't exist this line does nothing.
+#include? "Signing.local.xcconfig"
