@@ -47,7 +47,7 @@ macOS 14 or later. Apple Silicon recommended. To build you need Xcode 15+ and
 ## Build
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/freeflow.git
+git clone https://github.com/adithyaparthasarathy/freeflow.git
 ```
 
 ```bash
@@ -201,6 +201,83 @@ mandatory; the video is discarded.
 ## Not built
 
 Any language other than English, iOS or Android, team features.
+
+## Install, start to finish
+
+There is no download. You build it yourself, which takes about ten minutes, most of it
+waiting. Shipping a binary that runs on someone else's Mac without a Gatekeeper warning
+requires a paid Apple Developer account for notarization, and this project doesn't have one.
+
+**1. Install the two build tools.** Xcode from the App Store, then:
+
+```bash
+brew install xcodegen
+```
+
+**2. Get the code and generate the project.**
+
+```bash
+git clone https://github.com/adithyaparthasarathy/freeflow.git && cd freeflow && xcodegen generate
+```
+
+**3. Set up a signing certificate.** Optional, but do it now rather than later. Without it
+macOS forgets your permissions every time you rebuild. The commands are in
+[Making permissions stick](#making-permissions-stick) above. Skip only if you plan to build
+once and never touch it again.
+
+**4. Build.**
+
+```bash
+open FreeFlow.xcodeproj
+```
+
+Press the Run button (or ⌘R). The first build downloads WhisperKit and takes a few minutes.
+Later builds are quick.
+
+**5. Move it to Applications.** The app that Xcode built is buried in DerivedData. Put it
+somewhere permanent, which is also required for launch-at-login to work:
+
+```bash
+cp -R ~/Library/Developer/Xcode/DerivedData/FreeFlow-*/Build/Products/Debug/FreeFlow.app /Applications/
+```
+
+Then open it from `/Applications`, not from Xcode. macOS assigns permissions per app location,
+so grants made to the Xcode-run copy won't follow it.
+
+**6. Free up the `fn` key.** macOS assigns it to Dictation or Emoji by default and that
+assignment wins over anything this app does:
+
+> System Settings → Keyboard → "Press 🌐 key to" → Do Nothing
+
+Skip this if you chose a different trigger key.
+
+**7. Grant three permissions** when the app asks: Microphone, Accessibility, and Input
+Monitoring. All three are in System Settings → Privacy & Security. After granting Input
+Monitoring, quit and reopen the app; macOS only reads that one at launch.
+
+**8. Pick a model** in onboarding and let it download. `large-v3-turbo` unless you're on
+older hardware. This happens once.
+
+**9. Optionally paste a Groq key** from [console.groq.com/keys](https://console.groq.com/keys).
+Free, no card. Without one you get raw transcripts instead of cleaned-up text, and command
+mode is unavailable.
+
+Then hold your trigger key and talk.
+
+### If something doesn't work
+
+**The key does nothing.** Input Monitoring isn't granted, or `fn` is still bound to Dictation
+in System Settings. The app's dashboard shows which permission is missing.
+
+**Permissions look granted but the app disagrees.** Stale TCC entries from earlier ad-hoc
+builds. Fix the signing certificate, then run the `tccutil reset` line from
+[Making permissions stick](#making-permissions-stick).
+
+**Text doesn't appear.** Accessibility isn't granted. If it's granted and text still goes
+missing in one specific app, turn off direct write in Settings so it uses clipboard paste
+instead.
+
+**Nothing is transcribed.** Check the model finished downloading on the dashboard.
 
 ## Contributing
 
