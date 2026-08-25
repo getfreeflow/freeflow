@@ -26,3 +26,6 @@ Support/Signing.local.xcconfig
 *.env
 secrets.json
 credentials.json
+
+# The landing page lives in getfreeflow/getfreeflow.github.io
+docs/
