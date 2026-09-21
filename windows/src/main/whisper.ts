@@ -112,9 +112,16 @@ function unzip(zip: string, destination: string): Promise<void> {
 // MARK: - Binary
 
 /** The executable is called whisper-cli.exe in current builds and main.exe in
- *  older ones, and sits at a different depth depending on the zip. */
+ *  older ones, and sits at a different depth depending on the zip.
+ *
+ *  Order matters and is the whole point of this function. Current builds ship
+ *  both names, but their main.exe is a stub that prints "the binary 'main.exe'
+ *  is deprecated" and exits 1 without transcribing anything. Taking whichever
+ *  turned up first in the directory listing meant taking main.exe, because m
+ *  sorts before w. */
 function findExecutable(root: string): string | null {
-  const wanted = ['whisper-cli.exe', 'main.exe'];
+  const preference = ['whisper-cli.exe', 'main.exe'];
+  const found = new Map<string, string>();
   const queue = [root];
 
   while (queue.length > 0) {
@@ -122,9 +129,15 @@ function findExecutable(root: string): string | null {
     if (!dir) break;
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
+      const name = entry.name.toLowerCase();
       if (entry.isDirectory()) queue.push(full);
-      else if (wanted.includes(entry.name.toLowerCase())) return full;
+      else if (preference.includes(name) && !found.has(name)) found.set(name, full);
     }
+  }
+
+  for (const name of preference) {
+    const match = found.get(name);
+    if (match) return match;
   }
   return null;
 }
