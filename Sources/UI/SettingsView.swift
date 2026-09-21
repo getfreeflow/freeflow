@@ -35,7 +35,7 @@ private struct GeneralSettings: View {
                 VStack(alignment: .leading, spacing: Theme.Space.lg) {
                     ShSettingRow(
                         title: "Dictation key",
-                        subtitle: "Hold to talk, or tap to lock recording on"
+                        subtitle: "Hold to talk, or double-tap to lock recording on"
                     ) {
                         triggerPicker($preferences.dictationKey)
                     }
@@ -86,15 +86,25 @@ private struct GeneralSettings: View {
 
                     ShSeparator()
 
-                    ShSettingRow(title: "Recording overlay", subtitle: "Show a panel near the bottom of the screen while recording") {
+                    ShSettingRow(title: "Recording overlay", subtitle: "Grows out of the notch while you record") {
                         Toggle("", isOn: $preferences.showHUD)
                             .labelsHidden().toggleStyle(.switch)
                     }
 
                     ShSeparator()
 
-                    ShSettingRow(title: "Sound feedback", subtitle: "Play a cue when recording starts and stops") {
+                    ShSettingRow(title: "Sound feedback", subtitle: "Play a cue when a take ends") {
                         Toggle("", isOn: $preferences.playSounds)
+                            .labelsHidden().toggleStyle(.switch)
+                    }
+
+                    ShSeparator()
+
+                    ShSettingRow(
+                        title: "Use the Mac's microphone",
+                        subtitle: "Bluetooth headphones take a moment to turn their mic on and cut off your first words. Turn this off to record from the system input instead."
+                    ) {
+                        Toggle("", isOn: $preferences.useBuiltInMic)
                             .labelsHidden().toggleStyle(.switch)
                     }
 

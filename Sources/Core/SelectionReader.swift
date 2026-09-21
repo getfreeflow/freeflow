@@ -42,8 +42,13 @@ enum SelectionReader {
     /// When this is false the caller should leave the text on the clipboard instead
     /// of firing ⌘V into nothing. A paste with no destination looks to the user
     /// exactly like the dictation was lost.
+    ///
+    /// Only answers no when it knows. Chromium and Electron apps (Chrome, Slack,
+    /// Claude, VS Code) report no focused element at all unless a screen reader is
+    /// running, and treating that silence as "nowhere to type" sent every dictation
+    /// in them to the clipboard.
     static func focusedFieldLooksEditable() -> Bool {
-        guard let element = focusedElement() else { return false }
+        guard let element = focusedElement() else { return true }
 
         if let role = copyAttribute(element, kAXRoleAttribute) as? String,
            nonEditableRoles.contains(role) {

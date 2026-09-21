@@ -85,7 +85,10 @@ actor Transcriber {
             language: "en",
             temperature: 0.0,
             skipSpecialTokens: true,
-            withoutTimestamps: true
+            withoutTimestamps: true,
+            // Past 30 seconds, split at pauses. Otherwise the audio is cut into
+            // fixed 30 second windows and any word straddling a cut is mangled.
+            chunkingStrategy: .vad
         )
 
         let results = try await kit.transcribe(

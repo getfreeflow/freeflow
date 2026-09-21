@@ -1,62 +1,260 @@
 import AppKit
 import SwiftUI
 
+// MARK: - Status item
+
+/// The menu bar icon. Clicking it drops the panel out of the notch rather than
+/// opening a popover under the icon.
+@MainActor
+final class StatusItemController: NSObject {
+    static let shared = StatusItemController()
+
+    private var item: NSStatusItem?
+
+    func install() {
+        guard item == nil else { return }
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        if let button = item.button {
+            button.image = FreeFlowMark.menuBarImage()
+            button.setAccessibilityLabel("FreeFlow")
+            button.target = self
+            button.action = #selector(toggleMenu)
+        }
+        self.item = item
+    }
+
+    @objc private func toggleMenu() {
+        NotchMenuController.shared.toggle()
+    }
+}
+
+// MARK: - Controller
+
+@MainActor
+final class NotchMenuController: ObservableObject {
+    static let shared = NotchMenuController()
+
+    @Published private(set) var isShown = false
+    @Published private(set) var notch = NotchGeometry.current()
+
+    /// Panel width, shoulders included.
+    static let width: CGFloat = 460
+    static let shoulder: CGFloat = 8
+
+    private var panel: NotchPanel?
+    private var wantsShown = false
+    private var orderOutWork: DispatchWorkItem?
+    private var clickMonitor: Any?
+    private var resignObserver: NSObjectProtocol?
+    private var contentHeight: CGFloat = 520
+    private var hiddenAt = Date.distantPast
+
+    func toggle() {
+        if wantsShown {
+            hide()
+        } else if Date().timeIntervalSince(hiddenAt) > 0.3 {
+            // Clicking the icon while open also counts as a click outside, which
+            // has already closed it. Without the gap it would reopen at once.
+            show()
+        }
+    }
+
+    func show() {
+        // The notch is busy showing a take.
+        guard DictationController.shared.phase != .recording else { return }
+        orderOutWork?.cancel()
+        wantsShown = true
+
+        let panel = self.panel ?? makePanel()
+        self.panel = panel
+
+        if panel.isVisible {
+            isShown = true
+        } else {
+            notch = NotchGeometry.current()
+            isShown = false
+            resizeWindow()
+            panel.orderFrontRegardless()
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.wantsShown else { return }
+                self.isShown = true
+            }
+        }
+        // Key without activating the app, so the search field takes typing and
+        // whatever you were in stays frontmost underneath.
+        panel.makeKey()
+        watchForDismissal()
+    }
+
+    func hide() {
+        guard wantsShown else { return }
+        wantsShown = false
+        hiddenAt = Date()
+        stopWatching()
+        guard let panel, panel.isVisible else { return }
+        isShown = false
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.wantsShown else { return }
+            self.panel?.orderOut(nil)
+        }
+        orderOutWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28, execute: work)
+    }
+
+    /// The window follows the content, so no transparent part of it sits over the
+    /// screen swallowing clicks.
+    fileprivate func contentHeightChanged(_ height: CGFloat) {
+        guard height > 0, abs(height - contentHeight) > 0.5 else { return }
+        contentHeight = height
+        resizeWindow()
+    }
+
+    private func resizeWindow() {
+        let size = NSSize(width: Self.width + 48, height: contentHeight + 36)
+        panel?.setFrame(notch.windowFrame(size), display: true)
+    }
+
+    private func watchForDismissal() {
+        if clickMonitor == nil {
+            clickMonitor = NSEvent.addGlobalMonitorForEvents(
+                matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+            ) { [weak self] _ in
+                Task { @MainActor in self?.hide() }
+            }
+        }
+        if resignObserver == nil, let panel {
+            resignObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didResignKeyNotification,
+                object: panel,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in self?.hide() }
+            }
+        }
+    }
+
+    private func stopWatching() {
+        if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+        clickMonitor = nil
+        resignObserver = nil
+    }
+
+    private func makePanel() -> NotchPanel {
+        let panel = NotchPanel.make(
+            size: NSSize(width: Self.width + 48, height: contentHeight + 36),
+            acceptsKey: true
+        )
+        panel.appearance = NSAppearance(named: .darkAqua)
+        panel.host(
+            MenuBarPanel()
+                .environmentObject(DictationController.shared)
+                .environmentObject(Preferences.shared)
+                .environmentObject(self)
+        )
+        return panel
+    }
+}
+
+// MARK: - Panel
+
 struct MenuBarPanel: View {
     @EnvironmentObject private var controller: DictationController
     @EnvironmentObject private var preferences: Preferences
+    @EnvironmentObject private var menu: NotchMenuController
     @ObservedObject private var history = HistoryStore.shared
     @ObservedObject private var stats = StatsStore.shared
     @ObservedObject private var credentials = CredentialStore.shared
+    @Environment(\.openSettings) private var openSettings
 
     @State private var query = ""
+    @State private var contentHeight: CGFloat = 0
 
     var body: some View {
-        Group {
+        let shape = NotchShape(
+            topRadius: NotchMenuController.shoulder,
+            bottomRadius: menu.isShown ? 24 : 10
+        )
+
+        content
+            .frame(width: NotchMenuController.width)
+            .fixedSize(horizontal: false, vertical: true)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(key: HeightKey.self, value: proxy.size.height)
+                }
+            )
+            .opacity(menu.isShown ? 1 : 0)
+            .frame(width: shownSize.width, height: shownSize.height, alignment: .top)
+            .background(Color.black)
+            .clipShape(shape)
+            .shadow(color: .black.opacity(menu.isShown ? 0.35 : 0), radius: 18, y: 8)
+            .animation(
+                menu.isShown ? .spring(response: 0.42, dampingFraction: 0.84) : .easeIn(duration: 0.2),
+                value: menu.isShown
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .environment(\.colorScheme, .dark)
+            .onPreferenceChange(HeightKey.self) { height in
+                contentHeight = height
+                menu.contentHeightChanged(height)
+            }
+            .onExitCommand { menu.hide() }
+    }
+
+    /// Collapsed, it's the notch. Open, it's the full panel.
+    private var shownSize: CGSize {
+        if menu.isShown {
+            return CGSize(width: NotchMenuController.width, height: max(contentHeight, 1))
+        }
+        let notch = menu.notch
+        return CGSize(
+            width: notch.size.width + NotchMenuController.shoulder * 2,
+            height: notch.isReal ? notch.size.height : 0
+        )
+    }
+
+    private var content: some View {
+        VStack(spacing: 0) {
+            notchBand
             if preferences.hasOnboarded {
                 main
             } else {
-                setupPrompt
+                setup
             }
         }
-        .frame(width: 380)
-        .background(Theme.popover)
+        .padding(.horizontal, NotchMenuController.shoulder)
     }
 
-    /// Setup happens in a real window, so the popover just points at it.
-    private var setupPrompt: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.md) {
-            Image(systemName: "waveform")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(Theme.foreground)
-            Text("Finish setting up")
-                .font(Theme.Typography.title)
-                .foregroundStyle(Theme.foreground)
-            Text("Pick your keys, choose a speech model and grant access, and you're dictating.")
-                .font(Theme.Typography.small)
-                .foregroundStyle(Theme.mutedForeground)
-                .fixedSize(horizontal: false, vertical: true)
+    /// The strip level with the notch. Name on one side, state on the other, and
+    /// the notch itself in between.
+    private var notchBand: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 7) {
+                FreeFlowMark(height: 12)
+                Text("FreeFlow")
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .foregroundStyle(NotchPalette.text)
 
-            Button("Open setup") { MainWindowOpener.open() }
-                .buttonStyle(ShButtonStyle(variant: .primary, size: .md, fullWidth: true))
+            Spacer(minLength: menu.notch.size.width + 12)
 
-            Button("Quit") { NSApp.terminate(nil) }
-                .buttonStyle(ShButtonStyle(variant: .ghost, size: .sm, fullWidth: true))
+            StatusPill(text: badgeText, color: badgeColor)
         }
-        .padding(Theme.Space.lg)
+        .padding(.horizontal, 12)
+        .frame(height: menu.notch.size.height)
     }
 
-    // MARK: - Main
+    // MARK: Main
 
     private var main: some View {
         VStack(spacing: 0) {
-            header
-            ShSeparator()
-
-            VStack(alignment: .leading, spacing: Theme.Space.md) {
-                status
+            VStack(alignment: .leading, spacing: 12) {
+                statusCard
 
                 if let warning = controller.lastWarning {
-                    banner(warning, tone: .warning, symbol: "exclamationmark.triangle.fill")
+                    banner(warning, icon: .alert, tint: NotchPalette.caution)
                 }
                 if !controller.hotkeyActive {
                     permissionsBanner
@@ -65,108 +263,139 @@ struct MenuBarPanel: View {
                 statsRow
                 historySection
             }
-            .padding(Theme.Space.lg)
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 12)
 
-            ShSeparator()
+            Rectangle().fill(NotchPalette.hairline).frame(height: 1)
             footer
         }
     }
 
-    private var header: some View {
-        HStack(spacing: Theme.Space.sm) {
-            Image(systemName: "waveform")
-                .font(.system(size: 13, weight: .semibold))
-            Text("FreeFlow")
-                .font(Theme.Typography.heading)
-            Spacer()
-            ShBadge(text: badgeText, tone: badgeTone)
-        }
-        .foregroundStyle(Theme.foreground)
-        .padding(.horizontal, Theme.Space.lg)
-        .padding(.vertical, Theme.Space.md)
-    }
-
-    private var status: some View {
-        HStack(spacing: Theme.Space.md) {
+    private var statusCard: some View {
+        HStack(spacing: 12) {
             ZStack {
-                Circle()
-                    .fill(controller.phase == .recording ? Theme.destructive.opacity(0.14) : Theme.muted)
-                    .frame(width: 36, height: 36)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(NotchPalette.surface)
 
                 if controller.phase == .recording {
-                    LevelMeter(level: controller.level)
+                    WaveBars(level: controller.level, barCount: 5, barWidth: 2.5)
+                        .frame(width: 20, height: 16)
                 } else if controller.isBusy {
-                    ProgressView().controlSize(.small)
+                    PulsingDots()
                 } else {
-                    Image(systemName: "mic.fill")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.mutedForeground)
+                    Icon(.mic, size: 17).foregroundStyle(NotchPalette.secondary)
                 }
             }
+            .frame(width: 44, height: 44)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(controller.statusText)
-                    .font(Theme.Typography.bodyMedium)
-                    .foregroundStyle(Theme.foreground)
+            VStack(alignment: .leading, spacing: 4) {
+                headline
+                Text(subline)
+                    .font(.system(size: 12))
+                    .foregroundStyle(NotchPalette.secondary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(hint)
-                    .font(Theme.Typography.caption)
-                    .foregroundStyle(Theme.mutedForeground)
             }
 
             Spacer(minLength: 0)
         }
     }
 
-    private var statsRow: some View {
-        HStack(spacing: 0) {
-            stat(value: "\(stats.totalWords)", label: "words")
-            divider
-            stat(value: "\(stats.totalDictations)", label: "dictations")
-            divider
-            stat(value: stats.timeSavedDescription, label: "saved")
+    @ViewBuilder
+    private var headline: some View {
+        if controller.phase == .idle, controller.modelReady {
+            HStack(spacing: 6) {
+                Text("Hold")
+                KeyCap(preferences.dictationKey.label)
+                Text("to talk")
+            }
+            .font(.system(size: 14, weight: .medium))
+            .foregroundStyle(NotchPalette.text)
+        } else {
+            Text(controller.statusText)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(NotchPalette.text)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.vertical, Theme.Space.md)
-        .background(Theme.muted.opacity(0.5))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous))
     }
 
-    private func stat(value: String, label: String) -> some View {
-        VStack(spacing: 1) {
+    private var subline: String {
+        switch controller.phase {
+        case .recording:
+            return controller.isLatched
+                ? "Tap \(controller.triggerLabel) again to finish"
+                : "Let go to insert · esc to cancel"
+        case .idle where controller.modelReady:
+            var parts = ["Double-tap to lock it on"]
+            if preferences.commandKey != .off {
+                parts.append("\(preferences.commandKey.label) for commands")
+            }
+            if !credentials.hasKey {
+                parts.append("no Groq key, raw transcripts")
+            }
+            return parts.joined(separator: " · ")
+        default:
+            return credentials.hasKey ? "Cleanup is on" : "No Groq key, inserting raw transcripts"
+        }
+    }
+
+    private var statsRow: some View {
+        HStack(spacing: 0) {
+            stat(stats.totalWords.formatted(), "words")
+            verticalHairline
+            stat("\(stats.totalDictations)", "dictations")
+            verticalHairline
+            stat(stats.timeSavedDescription, "saved")
+        }
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous).fill(NotchPalette.surface)
+        )
+    }
+
+    private func stat(_ value: String, _ label: String) -> some View {
+        VStack(spacing: 2) {
             Text(value)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Theme.foreground)
+                .font(.system(size: 17, weight: .semibold).monospacedDigit())
+                .foregroundStyle(NotchPalette.text)
             Text(label)
-                .font(Theme.Typography.caption)
-                .foregroundStyle(Theme.mutedForeground)
+                .font(.system(size: 11))
+                .foregroundStyle(NotchPalette.secondary)
         }
         .frame(maxWidth: .infinity)
     }
 
-    private var divider: some View {
-        Rectangle().fill(Theme.border).frame(width: 1, height: 24)
+    private var verticalHairline: some View {
+        Rectangle().fill(NotchPalette.hairline).frame(width: 1, height: 26)
     }
 
-    // MARK: - History
+    // MARK: History
 
     private var historySection: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.sm) {
-            HStack {
-                ShSectionLabel(text: "History")
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("History")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(NotchPalette.text)
+                if !history.entries.isEmpty {
+                    Text("\(history.entries.count)")
+                        .font(.system(size: 12).monospacedDigit())
+                        .foregroundStyle(NotchPalette.tertiary)
+                }
                 Spacer()
                 if !history.entries.isEmpty {
-                    Button("Clear") { history.clear() }
-                        .buttonStyle(ShButtonStyle(variant: .ghost, size: .sm))
+                    TextButton(title: "Clear") { history.clear() }
                         .help("Clears everything except pinned entries")
                 }
             }
 
             if history.entries.isEmpty {
                 Text("Nothing yet. Hold \(preferences.dictationKey.label) and say something.")
-                    .font(Theme.Typography.small)
-                    .foregroundStyle(Theme.mutedForeground)
-                    .padding(.vertical, Theme.Space.sm)
+                    .font(.system(size: 12))
+                    .foregroundStyle(NotchPalette.secondary)
+                    .padding(.vertical, 6)
             } else {
                 if history.entries.count > 4 {
                     searchField
@@ -175,104 +404,135 @@ struct MenuBarPanel: View {
                 let results = history.search(query)
                 if results.isEmpty {
                     Text("No matches.")
-                        .font(Theme.Typography.small)
-                        .foregroundStyle(Theme.mutedForeground)
-                        .padding(.vertical, Theme.Space.sm)
+                        .font(.system(size: 12))
+                        .foregroundStyle(NotchPalette.secondary)
+                        .padding(.vertical, 6)
                 } else {
                     ScrollView {
-                        VStack(spacing: 5) {
+                        LazyVStack(spacing: 6) {
                             ForEach(results.prefix(20)) { entry in
                                 HistoryRow(entry: entry)
                             }
                         }
                     }
-                    .frame(maxHeight: 190)
+                    .scrollIndicators(.never)
+                    .frame(maxHeight: 150)
                 }
             }
         }
     }
 
     private var searchField: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.mutedForeground)
+        HStack(spacing: 7) {
+            Icon(.search, size: 13).foregroundStyle(NotchPalette.tertiary)
             TextField("Search", text: $query)
                 .textFieldStyle(.plain)
-                .font(Theme.Typography.small)
+                .font(.system(size: 12.5))
+                .foregroundStyle(NotchPalette.text)
             if !query.isEmpty {
-                Button {
-                    query = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill").font(.system(size: 11))
+                Button { query = "" } label: {
+                    Icon(.x, size: 11)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(Theme.mutedForeground)
+                .foregroundStyle(NotchPalette.tertiary)
             }
         }
-        .padding(.horizontal, 8)
-        .frame(height: 28)
-        .background(Theme.muted.opacity(0.6))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
+        .padding(.horizontal, 10)
+        .frame(height: 30)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous).fill(NotchPalette.surface)
+        )
     }
 
-    // MARK: - Banners
+    // MARK: Banners
 
     private var permissionsBanner: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.sm) {
+        VStack(alignment: .leading, spacing: 8) {
             banner(
                 "FreeFlow can't see your keyboard. Grant Accessibility and Input Monitoring.",
-                tone: .danger,
-                symbol: "lock.fill"
+                icon: .lock,
+                tint: NotchPalette.live
             )
-            HStack(spacing: Theme.Space.sm) {
-                Button("Open Settings") { Permissions.openAccessibilitySettings() }
-                    .buttonStyle(ShButtonStyle(variant: .outline, size: .sm))
-                Button("Retry") { controller.restartHotkey() }
-                    .buttonStyle(ShButtonStyle(variant: .secondary, size: .sm))
+            HStack(spacing: 6) {
+                TextButton(title: "Open Settings") { Permissions.openAccessibilitySettings() }
+                TextButton(title: "Retry") { controller.restartHotkey() }
             }
         }
     }
 
-    private func banner(_ message: String, tone: ShBadge.Tone, symbol: String) -> some View {
-        let color = tone == .danger ? Theme.destructive : Theme.warning
-        return HStack(alignment: .top, spacing: Theme.Space.sm) {
-            Image(systemName: symbol).font(.system(size: 11))
+    private func banner(_ message: String, icon: Lucide, tint: Color) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Icon(icon, size: 13).padding(.top, 1)
             Text(message)
-                .font(Theme.Typography.caption)
+                .font(.system(size: 11.5))
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
-        .foregroundStyle(color)
-        .padding(Theme.Space.sm)
-        .background(color.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
+        .foregroundStyle(tint)
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous).fill(tint.opacity(0.12))
+        )
     }
 
-    // MARK: - Footer
+    // MARK: Footer
 
     private var footer: some View {
-        HStack(spacing: Theme.Space.sm) {
-            SettingsLink {
-                Label("Settings", systemImage: "gearshape")
+        HStack(spacing: 2) {
+            FooterButton(icon: .appWindow, title: "Open FreeFlow") {
+                menu.hide()
+                MainWindowOpener.open()
             }
-            .buttonStyle(ShButtonStyle(variant: .ghost, size: .sm))
-
+            FooterButton(icon: .settings, title: "Settings") {
+                menu.hide()
+                NSApp.activate(ignoringOtherApps: true)
+                openSettings()
+            }
             Spacer()
-
-            Button("Quit") { NSApp.terminate(nil) }
-                .buttonStyle(ShButtonStyle(variant: .ghost, size: .sm))
-                .keyboardShortcut("q")
+            FooterButton(icon: .power, title: "Quit") {
+                NSApp.terminate(nil)
+            }
+            .keyboardShortcut("q")
         }
-        .padding(.horizontal, Theme.Space.md)
-        .padding(.vertical, Theme.Space.sm)
+        .padding(8)
     }
 
-    // MARK: - Derived
+    // MARK: Setup
+
+    /// Setup happens in a real window, so the panel just points at it.
+    private var setup: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Finish setting up")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(NotchPalette.text)
+            Text("Pick your keys, choose a speech model and grant access, and you're dictating.")
+                .font(.system(size: 12))
+                .foregroundStyle(NotchPalette.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button {
+                menu.hide()
+                MainWindowOpener.open()
+            } label: {
+                Text("Open setup")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 34)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.white))
+            }
+            .buttonStyle(PressableStyle())
+
+            FooterButton(icon: .power, title: "Quit") { NSApp.terminate(nil) }
+        }
+        .padding(16)
+    }
+
+    // MARK: Derived
 
     private var badgeText: String {
         switch controller.phase {
-        case .recording: return controller.mode == .command ? "Command" : "Recording"
+        case .recording: return controller.mode == .command ? "Command" : "Listening"
         case .transcribing, .polishing: return "Working"
         case .preparingModel: return "Loading"
         case .failed: return "Error"
@@ -280,25 +540,62 @@ struct MenuBarPanel: View {
         }
     }
 
-    private var badgeTone: ShBadge.Tone {
+    private var badgeColor: Color {
         switch controller.phase {
-        case .recording, .failed: return .danger
-        case .transcribing, .polishing, .preparingModel: return .warning
-        case .idle: return controller.modelReady ? .success : .neutral
+        case .recording, .failed: return NotchPalette.live
+        case .transcribing, .polishing, .preparingModel: return NotchPalette.caution
+        case .idle: return controller.modelReady ? NotchPalette.good : NotchPalette.tertiary
         }
-    }
-
-    private var hint: String {
-        if controller.phase == .recording { return "Press esc to cancel" }
-        if !credentials.hasKey { return "No Groq key, inserting raw transcripts" }
-        if preferences.commandKey != .off {
-            return "Hold \(preferences.dictationKey.label) to talk · \(preferences.commandKey.label) for commands"
-        }
-        return "Hold \(preferences.dictationKey.label) to talk, or tap to lock on"
     }
 }
 
-// MARK: - History row
+private struct HeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+// MARK: - Pieces
+
+private struct StatusPill: View {
+    let text: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text(text).font(.system(size: 11, weight: .medium))
+        }
+        .foregroundStyle(Color.white.opacity(0.82))
+        .padding(.horizontal, 8)
+        .frame(height: 20)
+        .background(Capsule().fill(Color.white.opacity(0.08)))
+    }
+}
+
+/// The trigger key, drawn as a key.
+private struct KeyCap: View {
+    let label: String
+
+    init(_ label: String) {
+        self.label = label
+    }
+
+    var body: some View {
+        Text(label)
+            .font(.system(size: 12, weight: .semibold))
+            .padding(.horizontal, 7)
+            .frame(height: 21)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous).fill(NotchPalette.surfaceRaised)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(NotchPalette.hairlineStrong, lineWidth: 1)
+            )
+    }
+}
 
 private struct HistoryRow: View {
     let entry: DictationEntry
@@ -307,52 +604,127 @@ private struct HistoryRow: View {
     @State private var copied = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: Theme.Space.sm) {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(entry.text)
-                    .font(Theme.Typography.small)
-                    .foregroundStyle(Theme.foreground)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(NotchPalette.text)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("\(entry.appName) · \(entry.date.formatted(.relative(presentation: .numeric)))")
-                    .font(Theme.Typography.caption)
-                    .foregroundStyle(Theme.mutedForeground)
+                HStack(spacing: 4) {
+                    if entry.pinned {
+                        Icon(.pin, size: 9).foregroundStyle(NotchPalette.secondary)
+                    }
+                    Text("\(entry.appName) · \(entry.date.formatted(.relative(presentation: .numeric)))")
+                        .font(.system(size: 11))
+                        .foregroundStyle(NotchPalette.tertiary)
+                }
             }
 
             Spacer(minLength: 0)
 
-            if hovering || entry.pinned || copied {
+            if hovering || copied {
                 HStack(spacing: 2) {
-                    iconButton(entry.pinned ? "pin.fill" : "pin", help: entry.pinned ? "Unpin" : "Pin") {
-                        history.togglePin(entry)
-                    }
-                    iconButton(copied ? "checkmark" : "doc.on.doc", help: "Copy") {
+                    RowAction(icon: copied ? .check : .copy, help: "Copy") {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(entry.text, forType: .string)
                         copied = true
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
                     }
-                    iconButton("trash", help: "Delete") {
+                    RowAction(icon: .pin, help: entry.pinned ? "Unpin" : "Pin", active: entry.pinned) {
+                        history.togglePin(entry)
+                    }
+                    RowAction(icon: .trash, help: "Delete") {
                         history.remove(entry)
                     }
                 }
+                .transition(.opacity)
             }
         }
-        .padding(Theme.Space.sm)
-        .background(hovering ? Theme.accent : Theme.muted.opacity(0.55))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(hovering ? NotchPalette.surfaceHover : NotchPalette.surface)
+        )
         .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovering)
     }
+}
 
-    private func iconButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+private struct RowAction: View {
+    let icon: Lucide
+    let help: String
+    var active = false
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
         Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 10))
-                .frame(width: 20, height: 20)
+            Icon(icon, size: 12)
+                .foregroundStyle(active || hovering ? NotchPalette.text : NotchPalette.secondary)
+                .frame(width: 24, height: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(hovering ? Color.white.opacity(0.08) : .clear)
+                )
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(Theme.mutedForeground)
         .help(help)
+        .onHover { hovering = $0 }
+    }
+}
+
+private struct FooterButton: View {
+    let icon: Lucide
+    let title: String
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Icon(icon, size: 13)
+                Text(title).font(.system(size: 12, weight: .medium))
+            }
+            .foregroundStyle(hovering ? NotchPalette.text : NotchPalette.secondary)
+            .padding(.horizontal, 10)
+            .frame(height: 28)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(hovering ? Color.white.opacity(0.07) : .clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+    }
+}
+
+private struct TextButton: View {
+    let title: String
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(hovering ? NotchPalette.text : NotchPalette.secondary)
+                .padding(.horizontal, 8)
+                .frame(height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(hovering ? Color.white.opacity(0.08) : .clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }

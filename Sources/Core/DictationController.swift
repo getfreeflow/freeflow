@@ -58,16 +58,32 @@ final class DictationController: ObservableObject {
     private let history = HistoryStore.shared
     private let stats = StatsStore.shared
 
+    /// Starting and stopping the mic happen here. With Bluetooth input a start can
+    /// take most of a second, and on the main thread that froze everything else.
+    private let audioQueue = DispatchQueue(label: "FreeFlow.audio", qos: .userInitiated)
+
     // MARK: - Session state
 
-    private var pressedAt = Date()
     private var recordingStartedAt = Date()
     private var targetApp = FrontmostApp.unknown
     private var capturedSelection: String?
     private var elapsedTimer: Timer?
     private var latchWatchdog: Timer?
+    private var secondTapTimer: Timer?
     private var heardSpeech = false
     private var cancellables = Set<AnyCancellable>()
+
+    /// A short press has ended and we're waiting to see if a second one follows.
+    private var awaitingSecondTap = false
+    /// The key-up of the tap that latched belongs to the gesture, not the take.
+    private var ignoreNextRelease = false
+
+    /// A press shorter than this is a tap, not a hold.
+    private let tapMaxDuration: TimeInterval = 0.3
+    /// How long after a first tap a second one still counts. Taps under 120ms are
+    /// only reported on key-up (see HotkeyMonitor), so this covers the whole
+    /// second tap, not just the gap before it.
+    private let doubleTapWindow: TimeInterval = 0.45
 
     /// A latched take that has captured no speech at all is abandoned after this
     /// long. Only applies before the first word; once you've started talking the
@@ -85,14 +101,16 @@ final class DictationController: ObservableObject {
                 if value > 0.06 { self.heardSpeech = true }
             }
         }
+        // HotkeyMonitor delivers on the main queue. Handled synchronously so a tap's
+        // press and release are seen in the order they happened.
         hotkey.onPress = { [weak self] role in
-            Task { @MainActor in self?.triggerDown(role) }
+            MainActor.assumeIsolated { self?.triggerDown(role) }
         }
-        hotkey.onRelease = { [weak self] role in
-            Task { @MainActor in self?.triggerUp(role) }
+        hotkey.onRelease = { [weak self] role, held in
+            MainActor.assumeIsolated { self?.triggerUp(role, heldFor: held) }
         }
         hotkey.onCancel = { [weak self] in
-            Task { @MainActor in self?.cancel() }
+            MainActor.assumeIsolated { self?.cancel() }
         }
 
         // Keep the tap in sync when the trigger keys are changed in Settings.
@@ -210,16 +228,23 @@ final class DictationController: ObservableObject {
     }
 
     // MARK: - Trigger handling
+    //
+    // Hold to talk; letting go inserts. Double-tap to latch recording on, then one
+    // more tap (or ✓) stops it. A single tap on its own does nothing.
+    //
+    // Recording starts on the first press either way, so a hold loses nothing to
+    // waiting and a double tap keeps the audio from its first tap.
 
-    /// Supports both styles without a setting: hold to talk, or tap to latch on and
-    /// tap again to stop.
     private func triggerDown(_ role: TriggerRole) {
         NSLog("FreeFlow: trigger down (%@)", role == .command ? "command" : "dictation")
         guard prefs.hasOnboarded else { return }
 
         if phase == .recording {
-            // Any trigger press while latched ends the take.
-            if isLatched { finish() }
+            if isLatched {
+                finish() // a tap while latched ends the take
+            } else if awaitingSecondTap, role == mode {
+                latch()
+            }
             return
         }
 
@@ -231,24 +256,51 @@ final class DictationController: ObservableObject {
         }
 
         mode = role
-        pressedAt = Date()
         isLatched = false
         beginRecording()
     }
 
-    private func triggerUp(_ role: TriggerRole) {
-        guard phase == .recording, !isLatched, role == mode else { return }
+    private func triggerUp(_ role: TriggerRole, heldFor held: TimeInterval) {
+        guard phase == .recording, role == mode else { return }
 
-        if Date().timeIntervalSince(pressedAt) < 0.4 {
-            isLatched = true // quick tap: keep going until the next tap
-            startLatchWatchdog()
+        if ignoreNextRelease {
+            ignoreNextRelease = false
+            return
+        }
+        guard !isLatched else { return }
+
+        if held < tapMaxDuration {
+            // Maybe the first half of a double tap. Keep recording and give up if
+            // no second tap arrives.
+            awaitingSecondTap = true
+            secondTapTimer?.invalidate()
+            secondTapTimer = Timer.scheduledTimer(withTimeInterval: doubleTapWindow, repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.awaitingSecondTap else { return }
+                    self.awaitingSecondTap = false
+                    self.discardTake(playSound: false) // a stray single tap
+                }
+            }
         } else {
             finish()
         }
     }
 
+    private func latch() {
+        cancelSecondTapWait()
+        isLatched = true
+        ignoreNextRelease = true
+        startLatchWatchdog()
+    }
+
+    private func cancelSecondTapWait() {
+        awaitingSecondTap = false
+        secondTapTimer?.invalidate()
+        secondTapTimer = nil
+    }
+
     /// Abandons a latched take that never heard anything, which is what an accidental
-    /// tap looks like. Without it the overlay would sit there indefinitely.
+    /// double tap looks like. Without it the overlay would sit there indefinitely.
     private func startLatchWatchdog() {
         latchWatchdog?.invalidate()
         latchWatchdog = Timer.scheduledTimer(
@@ -287,33 +339,54 @@ final class DictationController: ObservableObject {
         // Grab the selection now, while focus is still where the user left it.
         capturedSelection = mode == .command ? SelectionReader.selectedText() : nil
 
-        do {
-            try recorder.start()
-            phase = .recording
-            partialText = ""
-            lastWarning = nil
-            heardSpeech = false
-            recordingStartedAt = Date()
-            startElapsedTimer()
-            showHUD()
-        } catch {
-            NSLog("FreeFlow: recording failed to start: %@", String(describing: error))
-            lastWarning = error.localizedDescription
-            phase = .failed(error.localizedDescription)
-            showHUD() // otherwise the failure is completely invisible
-            scheduleHUDDismiss(after: 4)
+        // The overlay goes up straight away and the mic starts off the main thread.
+        phase = .recording
+        partialText = ""
+        lastWarning = nil
+        heardSpeech = false
+        awaitingSecondTap = false
+        ignoreNextRelease = false
+        recordingStartedAt = Date()
+        startElapsedTimer()
+        showHUD()
+
+        let preferBuiltIn = prefs.useBuiltInMic
+        audioQueue.async { [weak self, recorder] in
+            do {
+                try recorder.start(preferBuiltInMic: preferBuiltIn)
+            } catch {
+                Task { @MainActor in self?.recordingFailed(error) }
+            }
         }
     }
 
+    private func recordingFailed(_ error: Error) {
+        NSLog("FreeFlow: recording failed to start: %@", String(describing: error))
+        guard phase == .recording else { return }
+        resetTakeState()
+        lastWarning = error.localizedDescription
+        phase = .failed(error.localizedDescription)
+        showHUD() // otherwise the failure is completely invisible
+        scheduleHUDDismiss(after: 4)
+    }
+
     private func finish(insert: Bool = true) {
-        let samples = recorder.stop()
-        stopElapsedTimer()
-        stopLatchWatchdog()
-        isLatched = false
-        level = 0
+        resetTakeState()
+        // Out of .recording now, so presses while the mic shuts down are ignored.
+        phase = .transcribing
         Feedback.play(insert ? .stop : .cancel, enabled: prefs.playSounds)
 
-        guard samples.count >= minimumSamples else {
+        audioQueue.async { [weak self, recorder] in
+            let samples = recorder.stop()
+            Task { @MainActor in self?.captured(samples, insert: insert) }
+        }
+    }
+
+    private func captured(_ samples: [Float], insert: Bool) {
+        // Too short, or nothing ever rose above the noise floor. Whisper handed
+        // silence doesn't return nothing, it invents a word ("you", "uh"), which is
+        // where the stray one-word insertions came from.
+        guard samples.count >= minimumSamples, heardSpeech else {
             phase = .idle
             HUDController.shared.hide()
             return
@@ -321,16 +394,27 @@ final class DictationController: ObservableObject {
         Task { await process(samples, insert: insert) }
     }
 
+    /// `esc`, or a latched take that heard nothing.
     func cancel() {
+        discardTake(playSound: true)
+    }
+
+    private func discardTake(playSound: Bool) {
         guard phase == .recording else { return }
-        _ = recorder.stop()
-        stopElapsedTimer()
-        stopLatchWatchdog()
-        isLatched = false
-        level = 0
+        resetTakeState()
         phase = .idle
         HUDController.shared.hide()
-        Feedback.play(.cancel, enabled: prefs.playSounds)
+        audioQueue.async { [recorder] in _ = recorder.stop() }
+        if playSound { Feedback.play(.cancel, enabled: prefs.playSounds) }
+    }
+
+    private func resetTakeState() {
+        stopElapsedTimer()
+        stopLatchWatchdog()
+        cancelSecondTapWait()
+        isLatched = false
+        ignoreNextRelease = false
+        level = 0
     }
 
     // MARK: - Pipeline
@@ -347,6 +431,12 @@ final class DictationController: ObservableObject {
                     Task { @MainActor in self?.partialText = text.trimmingCharacters(in: .whitespaces) }
                 }
             )
+
+            guard !Self.isSilenceArtifact(raw) else {
+                phase = .idle
+                HUDController.shared.hide()
+                return
+            }
 
             var text = snippets.expand(vocabulary.applyCorrections(to: raw))
             guard !text.isEmpty else {
@@ -390,6 +480,20 @@ final class DictationController: ObservableObject {
             phase = .failed(error.localizedDescription)
             scheduleHUDDismiss(after: 2.5)
         }
+    }
+
+    /// What Whisper produces from breath, room noise or a clipped syllable. Only
+    /// dropped when it's the entire transcript, so real words are never touched.
+    private static let silenceArtifacts: Set<String> = [
+        "uh", "um", "umm", "hmm", "mm", "mhm", "you",
+        "blankaudio", "silence", "inaudible", "music"
+    ]
+
+    static func isSilenceArtifact(_ text: String) -> Bool {
+        let words = text.lowercased()
+            .components(separatedBy: .punctuationCharacters).joined()
+            .split(whereSeparator: \.isWhitespace)
+        return words.allSatisfy { silenceArtifacts.contains(String($0)) }
     }
 
     private func cleanUp(_ text: String) async -> String {
@@ -477,15 +581,6 @@ final class DictationController: ObservableObject {
     var elapsedDescription: String {
         let total = Int(elapsed)
         return String(format: "%d:%02d", total / 60, total % 60)
-    }
-
-    var menuBarSymbol: String {
-        switch phase {
-        case .recording: return "waveform.circle.fill"
-        case .transcribing, .polishing, .preparingModel: return "ellipsis.circle"
-        case .failed: return "exclamationmark.triangle"
-        case .idle: return "waveform"
-        }
     }
 
     var statusText: String {
