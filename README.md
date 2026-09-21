@@ -12,8 +12,8 @@ you can actually send, using an API key you supply.
 ## What it does
 
 **Dictation.** Hold the trigger key and talk. Release, and the text is inserted at your
-cursor. Tap the key instead of holding it to latch recording on; a small pill appears at the
-bottom of the screen with a discard and an insert button. `esc` throws the take away.
+cursor. Double-tap the key instead to lock recording on; the notch drops down with a discard
+and an insert button, and one more tap stops it. `esc` throws the take away.
 
 **Commands.** Select text anywhere, hold the command key, and say what you want done to it.
 "Cut this in half." "Make these bullets." The result replaces the selection. With nothing
@@ -45,6 +45,10 @@ Plus searchable history, launch at login, three model sizes, and a fully offline
 
 macOS 14 or later. Apple Silicon recommended. To build you need Xcode 15+ and
 [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
+
+On Windows, there's a separate build in [`windows/`](windows/README.md): Electron,
+whisper.cpp, and the same hold-to-talk loop. It covers dictation and cleanup, not the
+meeting recorder or the rest of the Mac feature set.
 
 ## Build
 
@@ -180,7 +184,7 @@ Three things in the source worth knowing about:
   the keycode of the physical key that moved, and the flag only decides up versus down.
 - Trigger keys are keys people type with. Firing on every Command-down would trigger on ⌘C, so
   a press only counts once it has been held alone past 120 ms. Add a second key and it's a
-  chord and gets ignored. A fast solo tap still latches.
+  chord and gets ignored. A fast solo tap still counts, which is what double-tap needs.
 
 The event tap is `.listenOnly`, so it observes without consuming and nothing you already use
 breaks. Insertion tries a direct Accessibility write first, which leaves the clipboard
@@ -289,7 +293,9 @@ company behind it, no paid tier planned, and no telemetry of any kind.
 ## Credits
 
 Speech recognition by [WhisperKit](https://github.com/argmaxinc/WhisperKit) from Argmax.
-Interface tokens adapted from [shadcn/ui](https://ui.shadcn.com). Language model calls go to
+Interface tokens adapted from [shadcn/ui](https://ui.shadcn.com). Icons from
+[Lucide](https://lucide.dev) (ISC, with a few from Feather under MIT; notices are in
+[Icons.swift](Sources/UI/Icons.swift)). Language model calls go to
 [Groq](https://groq.com).
 
 Independent and unaffiliated. Not connected to, sponsored by, or endorsed by any commercial

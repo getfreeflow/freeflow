@@ -1,0 +1,64 @@
+name: Windows installer
+
+# Builds the Windows installer on a Windows runner and attaches it to a release,
+# so there is a real download on the site without anyone owning a Windows machine.
+# Run it by hand from the Actions tab, or by pushing a tag like windows-v0.1.0.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'windows-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: windows/package-lock.json
+
+      - name: Install
+        working-directory: windows
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: windows
+        run: npm run typecheck
+
+      - name: Build installer
+        working-directory: windows
+        run: npm run dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FreeFlow-Windows-Setup
+          path: windows/dist_electron/FreeFlow-Windows-Setup.exe
+
+      # The installer is unsigned. Windows will show SmartScreen on first run, which
+      # the release notes and the site both say out loud.
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'windows-latest' }}
+          name: FreeFlow for Windows
+          body: |
+            FreeFlow for Windows. Hold Right Alt, talk, and the text lands where your cursor is.
+
+            Download `FreeFlow-Windows-Setup.exe` below.
+
+            The installer is not code signed, so Windows shows a blue "Windows protected
+            your PC" box the first time. Click **More info**, then **Run anyway**. Signing
+            would cost a few hundred dollars a year and this is a free project.
+
+            On first launch FreeFlow downloads whisper.cpp and a speech model, about 500MB,
+            once. Everything after that runs on your machine.
+          files: windows/dist_electron/FreeFlow-Windows-Setup.exe

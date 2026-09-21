@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>FreeFlow</title>
+    <link rel="stylesheet" href="shared.css" />
+    <style>
+      .band {
+        display: flex;
+        align-items: center;
+        height: 32px;
+      }
+
+      .ear {
+        display: grid;
+        place-items: center;
+        width: 52px;
+        height: 100%;
+      }
+
+      /* Where the notch would be on a Mac. Kept empty so the two builds line up. */
+      .gap {
+        width: 180px;
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        height: 34px;
+        padding: 0 12px 6px;
+      }
+
+      .row .message {
+        flex: 1;
+        text-align: center;
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.78);
+        line-height: 1.25;
+        overflow: hidden;
+      }
+
+      .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--live);
+        animation: breathe 1.9s ease-in-out infinite;
+      }
+
+      @keyframes breathe {
+        0%, 100% { opacity: 0.55; }
+        50% { opacity: 1; }
+      }
+
+      .dots span {
+        display: inline-block;
+        width: 3.5px;
+        height: 3.5px;
+        margin: 0 1.5px;
+        border-radius: 50%;
+        background: #fff;
+        animation: pulse 1.1s ease-in-out infinite;
+      }
+
+      .dots span:nth-child(2) { animation-delay: 0.18s; }
+      .dots span:nth-child(3) { animation-delay: 0.36s; }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 0.35; }
+        50% { opacity: 0.9; }
+      }
+
+      .mark {
+        display: flex;
+        align-items: center;
+        gap: 1.5px;
+        opacity: 0.5;
+      }
+
+      .mark i {
+        display: block;
+        width: 1.7px;
+        border-radius: 1px;
+        background: #fff;
+      }
+
+      canvas.bars { display: block; }
+    </style>
+  </head>
+  <body>
+    <div class="notch" id="notch">
+      <div class="shoulder left"></div>
+      <div class="shoulder right"></div>
+
+      <div class="contents">
+        <div class="band">
+          <div class="ear" id="earLeft"></div>
+          <div class="gap"></div>
+          <div class="ear" id="earRight"></div>
+        </div>
+        <div class="row" id="row" hidden></div>
+      </div>
+    </div>
+
+    <script src="icons.js"></script>
+    <script src="overlay.js"></script>
+  </body>
+</html>
