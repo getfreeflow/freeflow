@@ -81,11 +81,18 @@ final class Preferences: ObservableObject {
     @Published var preferDirectWrite: Bool {
         didSet { defaults.set(preferDirectWrite, forKey: Keys.directWrite) }
     }
+    /// Bluetooth headphones have to switch into their call profile before their mic
+    /// works, which takes most of a second and swallows the first words. The Mac's
+    /// own mic is ready instantly.
+    @Published var useBuiltInMic: Bool {
+        didSet { defaults.set(useBuiltInMic, forKey: Keys.builtInMic) }
+    }
     @Published var hasOnboarded: Bool {
         didSet { defaults.set(hasOnboarded, forKey: Keys.onboarded) }
     }
 
     private enum Keys {
+        static let builtInMic = "useBuiltInMic"
         static let model = "whisperModel"
         static let dictationKey = "dictationTriggerKey"
         static let commandKey = "commandTriggerKey"
@@ -108,6 +115,7 @@ final class Preferences: ObservableObject {
         playSounds = defaults.object(forKey: Keys.sounds) as? Bool ?? true
         showHUD = defaults.object(forKey: Keys.hud) as? Bool ?? true
         preferDirectWrite = defaults.object(forKey: Keys.directWrite) as? Bool ?? false
+        useBuiltInMic = defaults.object(forKey: Keys.builtInMic) as? Bool ?? true
         hasOnboarded = defaults.bool(forKey: Keys.onboarded)
     }
 }

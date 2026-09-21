@@ -7,16 +7,10 @@ struct FreeFlowApp: App {
     @StateObject private var controller = DictationController.shared
     @StateObject private var preferences = Preferences.shared
 
+    // The menu bar icon is an NSStatusItem set up in AppDelegate, because its panel
+    // drops out of the notch rather than hanging under the icon, which a
+    // MenuBarExtra can't do.
     var body: some Scene {
-        MenuBarExtra {
-            MenuBarPanel()
-                .environmentObject(controller)
-                .environmentObject(preferences)
-        } label: {
-            Image(systemName: controller.menuBarSymbol)
-        }
-        .menuBarExtraStyle(.window)
-
         Settings {
             SettingsView()
                 .environmentObject(controller)
@@ -101,6 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CredentialStore.shared.load()
 
         DictationController.shared.start()
+        StatusItemController.shared.install()
         MainWindowController.shared.show()
     }
 

@@ -1,122 +1,81 @@
 import AppKit
 import SwiftUI
 
-// MARK: - Panel
-
-/// Never takes focus. If it became key the frontmost app would change and dictated
-/// text would land in the overlay instead of wherever the user was typing. A
-/// `.nonactivatingPanel` still receives clicks, so the buttons work anyway.
-private final class HUDPanel: NSPanel {
-    override var canBecomeKey: Bool { false }
-    override var canBecomeMain: Bool { false }
-}
-
 // MARK: - Controller
 
+/// The recording overlay. It lives in the notch: at rest it's exactly the notch's
+/// size and invisible against it, and it grows out of it while you record.
+///
+/// Never takes key status. If it did, the frontmost app would lose focus and
+/// dictated text would land in the overlay instead of where you were typing.
 @MainActor
-final class HUDController {
+final class HUDController: ObservableObject {
     static let shared = HUDController()
 
-    private var panel: NSPanel?
-    private var hideWorkItem: DispatchWorkItem?
+    /// False shrinks the shape back into the notch.
+    @Published private(set) var isShown = false
+    @Published private(set) var notch = NotchGeometry.current()
 
-    /// Kept tight to the pill. The panel takes mouse events so its buttons work,
-    /// which makes any transparent margin a dead zone for clicks near the screen
-    /// edge. The pill is centred here, so height also controls how low it sits.
-    private static let size = NSSize(width: 200, height: 34)
-    /// From `visibleFrame`, so this clears the Dock when the Dock is showing.
-    private static let bottomInset: CGFloat = 4
+    private var panel: NotchPanel?
+    private var wantsShown = false
+    private var orderOutWork: DispatchWorkItem?
+
+    /// Room for the largest state plus its shadow.
+    private static let canvas = NSSize(width: 380, height: 110)
 
     func show(controller: DictationController) {
-        hideWorkItem?.cancel()
+        NotchMenuController.shared.hide()
+        orderOutWork?.cancel()
+        wantsShown = true
 
-        if panel == nil {
-            let panel = HUDPanel(
-                contentRect: NSRect(origin: .zero, size: Self.size),
-                styleMask: [.borderless, .nonactivatingPanel],
-                backing: .buffered,
-                defer: false
-            )
-            panel.isOpaque = false
-            panel.backgroundColor = .clear
-            panel.level = .statusBar
-            panel.hasShadow = false // drawn in SwiftUI so it follows the pill shape
-            panel.isMovableByWindowBackground = false
-            panel.hidesOnDeactivate = false
-            panel.ignoresMouseEvents = false // the discard / accept buttons need clicks
-            panel.collectionBehavior = [
-                .canJoinAllSpaces,
-                .fullScreenAuxiliary,
-                .stationary,
-                .ignoresCycle
-            ]
+        let panel = self.panel ?? makePanel(controller: controller)
+        self.panel = panel
 
-            // NSHostingView paints an opaque background of its own, which shows up
-            // as a black rectangle behind the rounded pill.
-            let hosting = NSHostingView(
-                rootView: RecordingHUD().environmentObject(controller)
-            )
-            hosting.wantsLayer = true
-            hosting.layer?.backgroundColor = NSColor.clear.cgColor
-            panel.contentView = hosting
-
-            self.panel = panel
+        guard !panel.isVisible else {
+            isShown = true
+            return
         }
 
-        guard let panel else { return }
-
-        let isAlreadyVisible = panel.isVisible
-        reposition(rising: !isAlreadyVisible)
-
-        if !isAlreadyVisible {
-            panel.alphaValue = 0
-            panel.orderFrontRegardless()
-            // Fade and drift up into place rather than snapping on.
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.18
-                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                panel.animator().alphaValue = 1
-                panel.animator().setFrame(restingFrame(), display: true)
-            }
-        } else {
-            panel.orderFrontRegardless()
+        notch = NotchGeometry.current()
+        isShown = false
+        panel.setFrame(notch.windowFrame(Self.canvas), display: false)
+        panel.orderFrontRegardless()
+        // A runloop later, so SwiftUI lays out the collapsed size first and grows
+        // out of it rather than appearing fully formed.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.wantsShown else { return }
+            self.isShown = true
         }
     }
 
     func hide() {
+        wantsShown = false
         guard let panel, panel.isVisible else { return }
-        hideWorkItem?.cancel()
+        isShown = false
+        panel.ignoresMouseEvents = true
 
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.16
-            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
-            panel.animator().alphaValue = 0
-        } completionHandler: {
-            panel.orderOut(nil)
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.wantsShown else { return }
+            self.panel?.orderOut(nil)
         }
+        orderOutWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
     }
 
-    // MARK: - Placement
+    /// Clicks pass straight through unless the overlay has buttons on it.
+    fileprivate func setInteractive(_ interactive: Bool) {
+        panel?.ignoresMouseEvents = !interactive
+    }
 
-    private func restingFrame() -> NSRect {
-        let mouse = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) }
-            ?? NSScreen.main
-        let visible = screen?.visibleFrame ?? .zero
-
-        return NSRect(
-            x: visible.midX - Self.size.width / 2,
-            y: visible.minY + Self.bottomInset,
-            width: Self.size.width,
-            height: Self.size.height
+    private func makePanel(controller: DictationController) -> NotchPanel {
+        let panel = NotchPanel.make(size: Self.canvas, acceptsKey: false)
+        panel.ignoresMouseEvents = true
+        panel.host(
+            RecordingHUD()
+                .environmentObject(controller)
+                .environmentObject(self)
         )
-    }
-
-    private func reposition(rising: Bool) {
-        guard let panel else { return }
-        var frame = restingFrame()
-        if rising { frame.origin.y -= 10 } // starting point for the drift up
-        panel.setFrame(frame, display: false)
+        return panel
     }
 }
 
@@ -124,6 +83,11 @@ final class HUDController {
 
 struct RecordingHUD: View {
     @EnvironmentObject private var controller: DictationController
+    @EnvironmentObject private var hud: HUDController
+
+    /// How far the shape reaches past each side of the notch.
+    private let ear: CGFloat = 52
+    private let shoulder: CGFloat = 6
 
     /// Only a latched take gets buttons. While the key is held there is nothing to
     /// decide (letting go inserts), so the controls would just be noise.
@@ -131,128 +95,172 @@ struct RecordingHUD: View {
         controller.phase == .recording && controller.isLatched
     }
 
+    /// Height of the row that drops below the notch, or zero when the state fits
+    /// in the ears either side of it.
+    private var rowHeight: CGFloat {
+        if showsControls { return 34 }
+        switch controller.phase {
+        case .failed: return 42
+        case .idle: return controller.lastOutcome == .inserted ? 0 : 30
+        default: return 0
+        }
+    }
+
+    private var shapeSize: CGSize {
+        let notch = hud.notch.size
+        guard hud.isShown else {
+            return CGSize(width: notch.width + shoulder * 2, height: hud.notch.isReal ? notch.height : 0)
+        }
+        return CGSize(width: notch.width + (ear + shoulder) * 2, height: notch.height + rowHeight)
+    }
+
+    private struct AnimationKey: Equatable {
+        let size: CGSize
+        let shown: Bool
+    }
+
     var body: some View {
-        HStack(spacing: 6) {
-            if showsControls {
-                iconButton("xmark", filled: false, help: "Don't insert (kept in History)") {
-                    controller.discardFromOverlay()
-                }
-            }
+        let size = shapeSize
+        let dropped = hud.isShown && rowHeight > 0
+        let shape = NotchShape(topRadius: shoulder, bottomRadius: dropped ? 16 : 10)
 
-            center
-
-            if showsControls {
-                iconButton("checkmark", filled: true, help: "Stop and insert") {
-                    controller.acceptFromOverlay()
-                }
+        VStack(spacing: 0) {
+            ears.frame(height: hud.notch.size.height)
+            if rowHeight > 0 {
+                row.frame(height: rowHeight)
             }
         }
-        .padding(.horizontal, 5)
-        .frame(height: 24)
-        .background(
-            Capsule().fill(Color(nsColor: NSColor(hex: 0x1C1C1E)).opacity(0.92))
+        .padding(.horizontal, shoulder)
+        .frame(width: size.width, height: size.height, alignment: .top)
+        .opacity(hud.isShown ? 1 : 0)
+        .background(shape.fill(Color.black))
+        .clipShape(shape)
+        .shadow(color: .black.opacity(dropped ? 0.3 : 0), radius: 10, y: 4)
+        // Grows on a spring and tucks away faster than it came out.
+        .animation(
+            hud.isShown ? .spring(response: 0.36, dampingFraction: 0.8) : .easeIn(duration: 0.2),
+            value: AnimationKey(size: size, shown: hud.isShown)
         )
-        .overlay(
-            Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5)
-        )
-        .shadow(color: .black.opacity(0.28), radius: 5, y: 2)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .environment(\.colorScheme, .dark)
+        .onChange(of: showsControls, initial: true) { _, interactive in
+            hud.setInteractive(interactive)
+        }
+    }
+
+    // MARK: Ears
+
+    private var ears: some View {
+        HStack(spacing: 0) {
+            leftEar.frame(width: ear)
+            Spacer(minLength: hud.notch.size.width)
+            rightEar.frame(width: ear)
+        }
     }
 
     @ViewBuilder
-    private var center: some View {
+    private var leftEar: some View {
         switch controller.phase {
         case .recording:
-            WaveBars(level: controller.level)
-                .frame(width: 46, height: 13)
-
+            LiveDot()
         case .transcribing, .polishing, .preparingModel:
-            HStack(spacing: 5) {
-                PulsingDots()
-                Text(busyLabel)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 3)
-
-        case .failed(let message):
-            HStack(spacing: 4) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 8))
-                    .foregroundStyle(.orange)
-                Text(message)
-                    .font(.system(size: 9))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .lineLimit(2)
-                    .frame(maxWidth: 150)
-            }
-            .padding(.horizontal, 3)
-
+            FreeFlowMark(height: 11).foregroundStyle(.white.opacity(0.5))
+        case .failed:
+            Icon(.alert, size: 13).foregroundStyle(NotchPalette.caution)
         case .idle:
             switch controller.lastOutcome {
             case .inserted:
-                Image(systemName: "checkmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.green)
-                    .padding(.horizontal, 8)
-
+                FreeFlowMark(height: 11).foregroundStyle(.white.opacity(0.5))
             case .copied:
-                // Nothing visibly happened in the target app, so without this the
-                // dictation looks like it vanished.
-                label("doc.on.clipboard", "Copied", tint: .white.opacity(0.9))
-
+                Icon(.clipboardCheck, size: 13).foregroundStyle(.white.opacity(0.85))
             case .discarded:
-                label("clock.arrow.circlepath", "Saved to History", tint: .white.opacity(0.7))
+                Icon(.history, size: 13).foregroundStyle(.white.opacity(0.7))
             }
         }
     }
 
-    private func label(_ symbol: String, _ text: String, tint: Color) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: symbol).font(.system(size: 9))
-            Text(text).font(.system(size: 10, weight: .medium)).lineLimit(1)
-        }
-        .foregroundStyle(tint)
-        .padding(.horizontal, 5)
-    }
-
-    private var busyLabel: String {
+    @ViewBuilder
+    private var rightEar: some View {
         switch controller.phase {
-        case .transcribing:   return "Transcribing"
-        case .polishing:      return controller.mode == .command ? "Thinking" : "Polishing"
-        case .preparingModel: return "Loading model"
-        default:              return ""
+        case .recording where controller.isLatched:
+            Icon(.lock, size: 11).foregroundStyle(.white.opacity(0.45))
+        case .recording:
+            WaveBars(level: controller.level, barCount: 7)
+                .frame(width: 30, height: 13)
+        case .transcribing, .polishing, .preparingModel:
+            PulsingDots()
+        case .idle where controller.lastOutcome == .inserted:
+            Icon(.check, size: 13, strokeWidth: 2.6).foregroundStyle(NotchPalette.good)
+        default:
+            EmptyView()
         }
     }
 
-    private func iconButton(
-        _ symbol: String,
-        filled: Bool,
+    // MARK: Row
+
+    @ViewBuilder
+    private var row: some View {
+        if showsControls {
+            HStack {
+                circleButton(.x, prominent: false, help: "Don't insert (kept in History)") {
+                    controller.discardFromOverlay()
+                }
+                Spacer()
+                WaveBars(level: controller.level, barCount: 13)
+                    .frame(width: 70, height: 15)
+                Spacer()
+                circleButton(.check, prominent: true, help: "Stop and insert") {
+                    controller.acceptFromOverlay()
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 6)
+        } else if case .failed(let message) = controller.phase {
+            Text(message)
+                .font(.system(size: 10.5))
+                .foregroundStyle(.white.opacity(0.8))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 6)
+        } else {
+            Text(controller.lastOutcome == .copied ? "Copied to clipboard" : "Saved to History")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.75))
+                .padding(.bottom, 6)
+        }
+    }
+
+    private func circleButton(
+        _ icon: Lucide,
+        prominent: Bool,
         help: String,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            ZStack {
-                Circle().fill(filled ? Color.white : Color.white.opacity(0.16))
-                Image(systemName: symbol)
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(filled ? Color(nsColor: NSColor(hex: 0x1C1C1E)) : .white)
-            }
-            .frame(width: 16, height: 16)
-            .contentShape(Circle())
+            Icon(icon, size: 11, strokeWidth: 2.6)
+                .foregroundStyle(prominent ? Color.black : .white)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(prominent ? Color.white : Color.white.opacity(0.16)))
+                .contentShape(Circle())
         }
-        .buttonStyle(HUDButtonStyle())
+        .buttonStyle(PressableStyle())
         .help(help)
     }
 }
 
-private struct HUDButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .opacity(configuration.isPressed ? 0.65 : 1)
-            .scaleEffect(configuration.isPressed ? 0.9 : 1)
-            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+// MARK: - Pieces
+
+/// The recording light. Breathes rather than blinks.
+private struct LiveDot: View {
+    var body: some View {
+        TimelineView(.animation) { context in
+            let time = context.date.timeIntervalSinceReferenceDate
+            Circle()
+                .fill(NotchPalette.live)
+                .frame(width: 7, height: 7)
+                .opacity(0.6 + 0.4 * (sin(time * 3) * 0.5 + 0.5))
+        }
     }
 }
 
@@ -273,13 +281,12 @@ private final class WaveState {
 /// travelling across the bars, a slow swell, a fast flutter) keep the pattern from
 /// visibly repeating. Mic level only scales how far the bars swing, and is
 /// low-pass filtered first so a jump in volume eases in instead of snapping.
-private struct WaveBars: View {
+struct WaveBars: View {
     let level: Float
+    var barCount = 11
+    var barWidth: CGFloat = 2
 
     @State private var state = WaveState()
-
-    private let barCount = 11
-    private let barWidth: CGFloat = 2
 
     var body: some View {
         // No `minimumInterval`. Capping this at 30fps was half the choppiness on a
@@ -290,7 +297,7 @@ private struct WaveBars: View {
                 let energy = advance(to: time)
 
                 let spacing = (size.width - CGFloat(barCount) * barWidth)
-                    / CGFloat(barCount - 1)
+                    / CGFloat(max(barCount - 1, 1))
 
                 for index in 0..<barCount {
                     let height = barHeight(index, time, energy, maximum: size.height)
@@ -337,7 +344,7 @@ private struct WaveBars: View {
 
         // Taper toward the ends so the group reads as a waveform, not a block.
         let centre = Double(barCount - 1) / 2
-        let taper = 1 - (abs(phase - centre) / centre) * 0.42
+        let taper = centre > 0 ? 1 - (abs(phase - centre) / centre) * 0.42 : 1
 
         let minimum: CGFloat = 2.5
         let span = (maximum - minimum) * CGFloat(unit * energy * taper)
@@ -345,7 +352,7 @@ private struct WaveBars: View {
     }
 }
 
-private struct PulsingDots: View {
+struct PulsingDots: View {
     var body: some View {
         TimelineView(.animation) { context in
             let time = context.date.timeIntervalSinceReferenceDate

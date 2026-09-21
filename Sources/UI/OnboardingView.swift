@@ -70,7 +70,7 @@ struct OnboardingView: View {
             ShCard(padding: Theme.Space.md) {
                 VStack(alignment: .leading, spacing: 6) {
                     Label("Hold to talk, release to insert", systemImage: "mic")
-                    Label("Tap to lock recording on", systemImage: "lock")
+                    Label("Double-tap to lock recording on", systemImage: "lock")
                     Label("Press esc to cancel", systemImage: "escape")
                 }
                 .font(Theme.Typography.small)
