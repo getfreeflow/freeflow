@@ -102,7 +102,7 @@ straight after. Nothing else touches the disk.
 | Global key watch | `uiohook-napi`, a low-level keyboard hook |
 | Microphone | Chromium `getUserMedia` in a hidden window, 16kHz mono |
 | Speech to text | `whisper.cpp` as a subprocess |
-| Cleanup | Groq chat completions, `llama-3.3-70b-versatile` |
+| Cleanup | Groq chat completions, `openai/gpt-oss-120b` |
 | Text insertion | Clipboard plus a synthetic Ctrl+V through a long-lived PowerShell |
 | UI | A normal app window, plus two frameless always-on-top windows drawn to look like the Mac notch |
 

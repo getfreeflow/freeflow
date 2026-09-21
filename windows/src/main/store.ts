@@ -38,6 +38,20 @@ export interface Stats {
   totalSeconds: number;
 }
 
+/// Groq moved the Llama models to their Enterprise plan, so a normal free key is
+/// refused for them. These are the text models a free key can still reach, best
+/// first. Anyone still carrying a retired id in their settings is moved off it.
+export const FREE_PLAN_MODEL = 'openai/gpt-oss-120b';
+
+const RETIRED_MODELS = new Set([
+  'llama-3.3-70b-versatile',
+  'llama-3.1-8b-instant',
+  'llama3-70b-8192',
+  'llama3-8b-8192',
+  'mixtral-8x7b-32768',
+  'gemma2-9b-it',
+]);
+
 const DEFAULT_SETTINGS: Settings = {
   // Right Alt, the closest thing to the Mac build's Right Option. Re-bindable.
   triggerKeycode: 3640,
@@ -47,7 +61,7 @@ const DEFAULT_SETTINGS: Settings = {
   model: 'small.en',
   useCuda: false,
   cleanupEnabled: true,
-  groqModel: 'llama-3.3-70b-versatile',
+  groqModel: FREE_PLAN_MODEL,
   showOverlay: true,
   playSounds: true,
   hasOnboarded: false,
@@ -86,7 +100,16 @@ function writeJson(name: string, value: unknown): void {
 let cachedSettings: Settings | null = null;
 
 export function settings(): Settings {
-  cachedSettings ??= readJson('settings.json', DEFAULT_SETTINGS);
+  if (!cachedSettings) {
+    const loaded = readJson('settings.json', DEFAULT_SETTINGS);
+    // Migrate anyone whose saved model has since been taken off the free plan.
+    // Without this, changing the default only helps new installs.
+    if (RETIRED_MODELS.has(loaded.groqModel)) {
+      loaded.groqModel = FREE_PLAN_MODEL;
+      writeJson('settings.json', loaded);
+    }
+    cachedSettings = loaded;
+  }
   return cachedSettings;
 }
 

@@ -105,13 +105,31 @@ final class Preferences: ObservableObject {
         static let onboarded = "hasOnboarded"
     }
 
+    /// Groq moved the Llama models onto their Enterprise plan, so a free key is
+    /// refused for them and cleanup fails for everyone still pointed at one. A
+    /// saved model that is no longer reachable is swapped for one that is.
+    static let freePlanGroqModel = "openai/gpt-oss-120b"
+
+    private static let retiredGroqModels: Set<String> = [
+        "llama-3.3-70b-versatile", "llama-3.1-8b-instant",
+        "llama3-70b-8192", "llama3-8b-8192",
+        "mixtral-8x7b-32768", "gemma2-9b-it"
+    ]
+
+    private static func usableGroqModel(_ saved: String?) -> String {
+        guard let saved, !saved.isEmpty, !retiredGroqModels.contains(saved) else {
+            return freePlanGroqModel
+        }
+        return saved
+    }
+
     private init() {
         modelChoice = WhisperModelChoice(rawValue: defaults.string(forKey: Keys.model) ?? "") ?? .turbo
         dictationKey = TriggerKey(rawValue: defaults.string(forKey: Keys.dictationKey) ?? "") ?? .fn
         commandKey = TriggerKey(rawValue: defaults.string(forKey: Keys.commandKey) ?? "") ?? .off
         cleanupEnabled = defaults.object(forKey: Keys.cleanup) as? Bool ?? true
         appAwareTone = defaults.object(forKey: Keys.tone) as? Bool ?? true
-        groqModel = defaults.string(forKey: Keys.groqModel) ?? "llama-3.3-70b-versatile"
+        groqModel = Preferences.usableGroqModel(defaults.string(forKey: Keys.groqModel))
         playSounds = defaults.object(forKey: Keys.sounds) as? Bool ?? true
         showHUD = defaults.object(forKey: Keys.hud) as? Bool ?? true
         preferDirectWrite = defaults.object(forKey: Keys.directWrite) as? Bool ?? false

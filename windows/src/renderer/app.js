@@ -11,6 +11,14 @@ document.getElementById('mark').innerHTML = [7, 11, 14, 10, 6]
   .map((height) => `<i style="height:${height}px"></i>`)
   .join('');
 
+/// The Groq text models a free key can reach. Kept here rather than fetched so
+/// Settings still renders with no key and no network.
+const CLEANUP_MODELS = [
+  { id: 'openai/gpt-oss-120b', name: 'GPT-OSS 120B, recommended' },
+  { id: 'openai/gpt-oss-20b', name: 'GPT-OSS 20B, quicker' },
+  { id: 'qwen/qwen3.8-27b', name: 'Qwen3.8 27B' },
+];
+
 const SCREENS = [
   { id: 'home', name: 'Dashboard', icon: 'home' },
   { id: 'history', name: 'History', icon: 'history' },
@@ -556,6 +564,23 @@ function settingsScreen() {
         `<input type="checkbox" id="cleanup"${settings.cleanupEnabled ? ' checked' : ''} />`
       )}
       ${field(
+        'Cleanup model',
+        'What Groq runs your transcript through. These are the ones a free key can reach; Groq moved the Llama models to their paid plans.',
+        `<select id="groqModel">
+          ${CLEANUP_MODELS.map(
+            (model) =>
+              `<option value="${model.id}"${
+                settings.groqModel === model.id ? ' selected' : ''
+              }>${model.name}</option>`
+          ).join('')}
+          ${
+            CLEANUP_MODELS.some((model) => model.id === settings.groqModel)
+              ? ''
+              : `<option value="${esc(settings.groqModel)}" selected>${esc(settings.groqModel)}</option>`
+          }
+        </select>`
+      )}
+      ${field(
         'Groq API key',
         'Stored as plain text in your app data folder. Anything running as you can read it.',
         `<input type="password" id="apiKey" placeholder="${
@@ -820,6 +845,7 @@ function wireSettings() {
   const set = (changes) => save('settings:set', changes);
 
   document.getElementById('model').onchange = (event) => set({ model: event.target.value });
+  document.getElementById('groqModel').onchange = (event) => set({ groqModel: event.target.value });
   document.getElementById('cuda').onchange = (event) => set({ useCuda: event.target.checked });
   document.getElementById('cleanup').onchange = (event) => set({ cleanupEnabled: event.target.checked });
   document.getElementById('overlay').onchange = (event) => set({ showOverlay: event.target.checked });
