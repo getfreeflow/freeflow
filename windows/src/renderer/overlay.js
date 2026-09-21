@@ -5,8 +5,12 @@ const earLeft = document.getElementById('earLeft');
 const earRight = document.getElementById('earRight');
 const row = document.getElementById('row');
 
-const COLLAPSED = { width: 180, height: 0 };
-const BAND = 32;
+const COLLAPSED = { width: 150, height: 0 };
+const BAND = 34;
+
+/** Wide enough for the discard and insert buttons when the row is showing, and
+ *  only as wide as the level meter when it isn't. */
+const OPEN_WIDTH = { plain: 168, withRow: 268 };
 
 let state = { phase: 'idle', latched: false, outcome: 'inserted', statusMessage: '' };
 let open = false;
@@ -20,7 +24,7 @@ function mark() {
 
 /** How tall the part below the band is, if anything. */
 function rowHeight() {
-  if (state.phase === 'recording' && state.latched) return 34;
+  if (state.phase === 'recording' && state.latched) return 36;
   if (state.phase === 'failed') return 42;
   if (state.phase === 'idle' && state.outcome !== 'inserted') return 30;
   return 0;
@@ -28,7 +32,7 @@ function rowHeight() {
 
 function render() {
   const extra = rowHeight();
-  const width = open ? 284 : COLLAPSED.width;
+  const width = open ? (extra > 0 ? OPEN_WIDTH.withRow : OPEN_WIDTH.plain) : COLLAPSED.width;
   const height = open ? BAND + extra : COLLAPSED.height;
 
   notch.style.setProperty('--w', `${width}px`);

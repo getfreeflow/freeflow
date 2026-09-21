@@ -15,7 +15,7 @@
   --live: #ff453a;
   --good: #30d158;
   --caution: #ffb340;
-  --shoulder: 8px;
+  --shoulder: 13px;
 }
 
 * {
@@ -43,14 +43,16 @@ body {
 }
 
 /* The shape itself. Width and height are driven from script; everything else is
-   fixed so the transition has only two things to animate. */
+   fixed so the transition has only two things to animate.
+
+   The shoulders hang outside this box, so it cannot clip its overflow. The
+   contents clip themselves instead. */
 .notch {
   position: relative;
   background: #000;
   border-radius: 0 0 var(--radius, 16px) var(--radius, 16px);
   width: var(--w, 180px);
   height: var(--h, 0px);
-  overflow: hidden;
   transition:
     width 0.34s cubic-bezier(0.2, 0.9, 0.25, 1),
     height 0.34s cubic-bezier(0.2, 0.9, 0.25, 1),
@@ -88,6 +90,8 @@ body {
   opacity: 0;
   transition: opacity 0.16s ease-out 0.08s;
   height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
 }
 
 .notch.open .contents {

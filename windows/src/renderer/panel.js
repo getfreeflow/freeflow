@@ -216,6 +216,7 @@ function render() {
   body.innerHTML =
     (showSettings ? renderSettings() : renderMain()) +
     `<div class="footer">
+       <button class="ghost" id="openApp">${icon('home', 13)} Open FreeFlow</button>
        <button class="ghost" id="toggleSettings">${icon(showSettings ? 'history' : 'settings', 13)} ${
          showSettings ? 'Back' : 'Settings'
        }</button>
@@ -233,6 +234,10 @@ function render() {
 
 function wire() {
   document.getElementById('quit').onclick = () => window.freeflow.send('panel:quit');
+  document.getElementById('openApp').onclick = () => {
+    window.freeflow.send('window:show');
+    window.freeflow.send('panel:hide');
+  };
   document.getElementById('toggleSettings').onclick = () => {
     showSettings = !showSettings;
     render();

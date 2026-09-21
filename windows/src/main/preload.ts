@@ -3,9 +3,9 @@ import { contextBridge, ipcRenderer } from 'electron';
 /// The only bridge between the windows and the main process. Named channels only,
 /// so a renderer can't reach anything that wasn't deliberately offered.
 
-const RECEIVE = ['state', 'level', 'overlay:show', 'overlay:hide', 'panel:open', 'panel:close', 'audio:start', 'audio:stop'] as const;
-const SEND = ['overlay:accept', 'overlay:discard', 'panel:hide', 'panel:quit', 'audio:chunk', 'audio:failed'] as const;
-const INVOKE = ['state:get', 'settings:set', 'key:set', 'trigger:capture', 'history:update', 'folder:open'] as const;
+const RECEIVE = ['state', 'level', 'theme', 'overlay:show', 'overlay:hide', 'panel:open', 'panel:close', 'audio:start', 'audio:stop'] as const;
+const SEND = ['overlay:accept', 'overlay:discard', 'panel:hide', 'panel:quit', 'audio:chunk', 'audio:failed', 'window:show', 'window:minimize', 'window:close'] as const;
+const INVOKE = ['state:get', 'settings:set', 'key:set', 'trigger:capture', 'history:update', 'folder:open', 'vocabulary:set', 'snippets:set', 'actions:set', 'style:set'] as const;
 
 type Receive = (typeof RECEIVE)[number];
 type Send = (typeof SEND)[number];

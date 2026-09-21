@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, ipcMain, screen, shell, nativeImage } from 'electron';
+import { app, BrowserWindow, Tray, Menu, ipcMain, screen, shell, nativeImage, nativeTheme } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import * as store from './store';
@@ -34,7 +34,10 @@ const SILENT_LATCH_MS = 15_000;
 
 let overlay: BrowserWindow | null = null;
 let panel: BrowserWindow | null = null;
+let main: BrowserWindow | null = null;
 let tray: Tray | null = null;
+/// Set on the way out, so closing the window hides it but quitting really quits.
+let quitting = false;
 let hotkey: HotkeyMonitor | null = null;
 
 const recorder = new Recorder();
@@ -90,6 +93,50 @@ function createOverlay(): void {
   // Clicks pass through unless the overlay has buttons on it.
   overlay.setIgnoreMouseEvents(true, { forward: true });
   void overlay.loadFile(path.join(RENDERER, 'overlay.html'));
+}
+
+/// The app itself: a normal window with a taskbar button, an Alt-Tab entry and a
+/// Start Menu shortcut. The tray panel is a glance; this is where the history,
+/// insights, vocabulary and settings live.
+///
+/// Closing it hides it rather than quitting, because the trigger key has to keep
+/// working with no window open. Quit is on the tray menu and inside the app.
+function createMainWindow(): void {
+  main = new BrowserWindow({
+    width: 1040,
+    height: 720,
+    minWidth: 860,
+    minHeight: 560,
+    show: false,
+    title: 'FreeFlow',
+    icon: path.join(ASSETS, 'icon.ico'),
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0f0f10' : '#f6f6f7',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+    },
+  });
+
+  void main.loadFile(path.join(RENDERER, 'app.html'));
+
+  main.on('close', (event) => {
+    if (quitting) return;
+    event.preventDefault();
+    main?.hide();
+  });
+
+  nativeTheme.on('updated', () => {
+    main?.webContents.send('theme', nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
+  });
+}
+
+function showMain(): void {
+  if (!main) return;
+  if (main.isMinimized()) main.restore();
+  main.show();
+  main.focus();
+  broadcast();
 }
 
 function createPanel(): void {
@@ -171,9 +218,15 @@ function snapshot(): object {
     statusMessage,
     modelReady: whisper.isReady(),
     hasKey: store.apiKey().length > 0,
+    theme: nativeTheme.shouldUseDarkColors ? 'dark' : 'light',
     settings,
     stats: store.stats(),
-    history: store.history().slice(0, 40),
+    history: store.history().slice(0, 200),
+    vocabulary: store.vocabulary(),
+    snippets: store.snippets(),
+    actions: store.actions(),
+    style: store.styleRules(),
+    days: store.days(),
   };
 }
 
@@ -181,6 +234,7 @@ function broadcast(): void {
   const state = snapshot();
   overlay?.webContents.send('state', state);
   if (panel?.isVisible()) panel.webContents.send('state', state);
+  if (main && !main.isDestroyed()) main.webContents.send('state', state);
 }
 
 // MARK: - Trigger handling
@@ -311,7 +365,10 @@ async function finish(insert: boolean): Promise<void> {
     }
 
     const where = await targetApp;
-    let text = raw;
+
+    // Vocabulary and snippets are applied to the raw transcript, before cleanup,
+    // so the model shapes the expanded text rather than the trigger word.
+    let text = store.applySnippets(store.applyVocabulary(raw));
 
     const key = store.apiKey();
     if (store.settings().cleanupEnabled && key) {
@@ -321,8 +378,11 @@ async function finish(insert: boolean): Promise<void> {
         text = await groq.complete(
           key,
           store.settings().groqModel,
-          cleanupSystemPrompt(where.process, where.name),
-          raw
+          cleanupSystemPrompt(where.process, where.name, {
+            style: store.styleFor(where.process),
+            vocabulary: store.vocabulary(),
+          }),
+          text
         );
       } catch (error) {
         // Never lose a dictation to a cleanup failure. Keep the raw transcript and
@@ -344,6 +404,7 @@ async function finish(insert: boolean): Promise<void> {
 
     outcome = (await inject.insert(text)) === 'pasted' ? 'inserted' : 'copied';
     store.recordStats(text, seconds);
+    store.recordDay(text, seconds, where.name);
     phase = 'idle';
     broadcast();
     scheduleOverlayHide(outcome === 'copied' ? 1800 : 900);
@@ -381,13 +442,36 @@ async function prepareModel(): Promise<void> {
 
 // MARK: - Tray
 
+function trayIcon(): Electron.NativeImage {
+  // The taskbar is dark under the dark theme and light under the light one, and
+  // a white mark vanishes on a light taskbar. shouldUseDarkColors follows the app
+  // theme rather than the taskbar's, which are separate settings in Windows, but
+  // it is right far more often than a fixed choice would be.
+  const name = nativeTheme.shouldUseDarkColors ? 'tray.png' : 'tray-light.png';
+  const file = path.join(ASSETS, name);
+  return fs.existsSync(file) ? nativeImage.createFromPath(file) : nativeImage.createEmpty();
+}
+
 function createTray(): void {
-  const iconPath = path.join(ASSETS, 'tray.png');
-  const icon = fs.existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : nativeImage.createEmpty();
-  tray = new Tray(icon);
+  tray = new Tray(trayIcon());
   tray.setToolTip('FreeFlow');
+
+  // Left click drops the panel from the top of the screen, the way clicking the
+  // menu bar does on a Mac. Right click is the Windows convention for a menu.
   tray.on('click', () => (panel?.isVisible() ? hidePanel() : showPanel()));
-  tray.on('right-click', () => (panel?.isVisible() ? hidePanel() : showPanel()));
+  tray.on('double-click', () => showMain());
+
+  const menu = Menu.buildFromTemplate([
+    { label: 'Open FreeFlow', click: () => showMain() },
+    { label: 'Quick panel', click: () => (panel?.isVisible() ? hidePanel() : showPanel()) },
+    { type: 'separator' },
+    { label: 'Your data folder', click: () => void shell.openPath(app.getPath('userData')) },
+    { type: 'separator' },
+    { label: 'Quit FreeFlow', click: () => app.quit() },
+  ]);
+  tray.setContextMenu(menu);
+
+  nativeTheme.on('updated', () => tray?.setImage(trayIcon()));
 }
 
 // MARK: - IPC
@@ -435,6 +519,37 @@ function registerIpc(): void {
   });
 
   ipcMain.handle('folder:open', () => shell.openPath(app.getPath('userData')));
+
+  // The screens in the main window. Each one reads a collection and writes it
+  // back whole: these are tens of rows, not thousands, and a whole-list write
+  // cannot leave two halves disagreeing.
+  ipcMain.handle('vocabulary:set', (_event, terms: string[]) => {
+    store.setVocabulary(terms);
+    broadcast();
+    return snapshot();
+  });
+
+  ipcMain.handle('snippets:set', (_event, items: store.Snippet[]) => {
+    store.setSnippets(items);
+    broadcast();
+    return snapshot();
+  });
+
+  ipcMain.handle('actions:set', (_event, items: store.Action[]) => {
+    store.setActions(items);
+    broadcast();
+    return snapshot();
+  });
+
+  ipcMain.handle('style:set', (_event, items: store.StyleRule[]) => {
+    store.setStyleRules(items);
+    broadcast();
+    return snapshot();
+  });
+
+  ipcMain.on('window:show', () => showMain());
+  ipcMain.on('window:minimize', () => main?.minimize());
+  ipcMain.on('window:close', () => main?.hide());
 }
 
 // MARK: - Lifecycle
@@ -444,7 +559,7 @@ app.setName('FreeFlow');
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => showPanel());
+  app.on('second-instance', () => showMain());
 
   void app.whenReady().then(async () => {
     // A tray app, so no Dock or taskbar presence of its own.
@@ -453,6 +568,7 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc();
     createOverlay();
     createPanel();
+    createMainWindow();
     createTray();
 
     inject.warmUp();
@@ -480,7 +596,9 @@ if (!app.requestSingleInstanceLock()) {
     hotkey.start();
 
     void prepareModel();
-    if (!settings.hasOnboarded) showPanel();
+    // First run opens the app so there is something to look at while the model
+    // downloads. After that it starts quietly in the tray.
+    if (!settings.hasOnboarded) showMain();
   });
 
   app.on('window-all-closed', () => {
@@ -488,6 +606,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on('before-quit', () => {
+    quitting = true;
     hotkey?.stop();
     inject.shutdown();
     foreground.shutdown();

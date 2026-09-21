@@ -16,7 +16,13 @@ your own API key. Turn that off and nothing goes anywhere.
 - Press Esc while recording to throw the take away.
 - A small panel drops out of the top centre of the screen while you talk, with a live
   level meter. It is the Windows stand-in for the Mac build's notch overlay.
-- Click the tray icon for history, stats and settings.
+- Click the tray icon for a quick panel, or open the app for everything else.
+
+The app window has Dashboard, History, Insights, Vocabulary, Snippets, Actions, Style
+and Settings, and follows the Windows light or dark theme.
+
+**Meetings is not ported.** On the Mac, FreeFlow can record both sides of a call from
+the system's audio output and write it up. That is Mac-only. Everything else is here.
 
 ## Requirements
 
@@ -77,8 +83,9 @@ else to `api.groq.com`.
 `%APPDATA%\FreeFlow` (or `%APPDATA%\freeflow-windows` when you run it from source):
 
 - `settings.json`
-- `history.json`, the last transcripts shown in the panel
-- `stats.json`
+- `history.json`, the last 200 transcripts
+- `stats.json` and `insights.json`, the totals and the per-day record
+- `vocabulary.json`, `snippets.json`, `actions.json`, `style.json`
 - `credentials.json`, which holds your Groq API key
 
 **The API key is stored in plain text.** Windows Credential Manager would be better and
@@ -97,7 +104,7 @@ straight after. Nothing else touches the disk.
 | Speech to text | `whisper.cpp` as a subprocess |
 | Cleanup | Groq chat completions, `llama-3.3-70b-versatile` |
 | Text insertion | Clipboard plus a synthetic Ctrl+V through a long-lived PowerShell |
-| UI | Two frameless always-on-top windows, drawn to look like the Mac notch |
+| UI | A normal app window, plus two frameless always-on-top windows drawn to look like the Mac notch |
 
 ## Known limitations
 
@@ -111,6 +118,7 @@ straight after. Nothing else touches the disk.
   one. It sits at the top centre of the primary display.
 - **First recording after boot is slightly slower**, while Windows wakes the microphone.
 - English only, matching the Mac build.
+- **No meeting recorder.** See above.
 
 ## Licences
 

@@ -5,31 +5,40 @@
     <title>FreeFlow</title>
     <link rel="stylesheet" href="shared.css" />
     <style>
+      /* A Mac puts its two ears either side of the physical notch. A Windows
+         laptop has no notch, so there is nothing to leave room for: the contents
+         sit together in the middle of the shape. */
       .band {
         display: flex;
         align-items: center;
-        height: 32px;
+        justify-content: center;
+        gap: 12px;
+        height: 34px;
+        padding: 0 16px;
       }
 
       .ear {
-        display: grid;
-        place-items: center;
-        width: 52px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 16px;
         height: 100%;
       }
 
-      /* Where the notch would be on a Mac. Kept empty so the two builds line up. */
-      .gap {
-        width: 180px;
+      .ear:empty {
+        display: none;
       }
 
+      /* Padding has to be symmetric. A bottom-only inset pulls everything in the
+         row three pixels above the middle of the shape, which reads as wrong
+         without being obviously wrong. */
       .row {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 10px;
-        height: 34px;
-        padding: 0 12px 6px;
+        height: 36px;
+        padding: 0 12px;
       }
 
       .row .message {
@@ -97,7 +106,6 @@
       <div class="contents">
         <div class="band">
           <div class="ear" id="earLeft"></div>
-          <div class="gap"></div>
           <div class="ear" id="earRight"></div>
         </div>
         <div class="row" id="row" hidden></div>

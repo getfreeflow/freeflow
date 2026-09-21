@@ -33,11 +33,18 @@
     ],
     "win": {
       "target": "nsis",
-      "artifactName": "FreeFlow-Windows-Setup.${ext}"
+      "artifactName": "FreeFlow-Windows-Setup.${ext}",
+      "icon": "assets/icon.ico"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "FreeFlow"
     }
   }
 }

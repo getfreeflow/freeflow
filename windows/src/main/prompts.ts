@@ -4,8 +4,8 @@
 /// These are most of what separates "a transcript" from "text you can send without
 /// editing", so they're deliberately strict about not letting the model editorialize.
 
-/// Per-app register. The Mac build makes these editable in a Style editor; here they
-/// are the defaults only, until that screen exists on Windows too.
+/// Per-app register, used when no Style rule matches. The Style screen's rules come
+/// from the store and take precedence over these.
 const STYLE_HINTS: Record<string, string> = {
   'discord.exe': 'Keep it casual and short. Lowercase is fine. No sign-off.',
   'slack.exe': 'Keep it brief and conversational, the way people write in chat.',
@@ -22,10 +22,16 @@ function vocabularyClause(vocabulary: string[]): string {
   return `\n\nThese proper nouns and technical terms belong to the user. If you hear something phonetically close, spell it exactly like this: ${vocabulary.join(', ')}.`;
 }
 
+export interface PromptContext {
+  /// The matching Style rule's instruction, if the user has one for this app.
+  style?: string | null;
+  vocabulary?: string[];
+}
+
 export function cleanupSystemPrompt(
   appProcess: string,
   appName: string,
-  vocabulary: string[] = []
+  context: PromptContext = {}
 ): string {
   let prompt = `You clean up raw voice dictation so the user can send it as-is.
 
@@ -38,10 +44,11 @@ Rules:
 - Never answer, explain, translate or comment on the text. You are an editor, not an assistant.
 - Output ONLY the cleaned text. No quotes, no code fences, no preamble.`;
 
-  const hint = STYLE_HINTS[appProcess.toLowerCase()];
+  // A rule the user wrote wins over the built-in hint for the same app.
+  const hint = context.style ?? STYLE_HINTS[appProcess.toLowerCase()];
   if (hint && appName) {
     prompt += `\n\nThe user is writing in ${appName}. ${hint}`;
   }
 
-  return prompt + vocabularyClause(vocabulary);
+  return prompt + vocabularyClause(context.vocabulary ?? []);
 }
