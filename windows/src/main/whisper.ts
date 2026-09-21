@@ -30,8 +30,14 @@ export interface Progress {
 
 export type ProgressHandler = (progress: Progress) => void;
 
+/** Electron's userData, unless something set FREEFLOW_DATA_DIR. The override is
+ *  what lets the smoke test drive this file on a CI runner with no Electron. */
+function dataRoot(): string {
+  return process.env.FREEFLOW_DATA_DIR ?? app.getPath('userData');
+}
+
 function supportDir(name: string): string {
-  const dir = path.join(app.getPath('userData'), name);
+  const dir = path.join(dataRoot(), name);
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -196,10 +202,26 @@ export function transcribe(wavPath: string): Promise<string> {
     let errors = '';
     child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString()));
     child.stderr.on('data', (chunk: Buffer) => (errors += chunk.toString()));
-    child.on('error', reject);
+    child.on('error', (error) => reject(new Error(`Could not start the speech engine: ${error.message}`)));
     child.on('exit', (code) => {
       if (code !== 0) {
-        reject(new Error(errors.trim().split('\n').slice(-3).join(' ') || `whisper exited with ${code}`));
+        // "exited with 1" on its own tells nobody anything. whisper.cpp puts its
+        // real complaint on stderr, and a missing DLL kills it before it writes
+        // any, so the command itself is part of the message.
+        const said = [errors, out]
+          .map((stream) => stream.trim())
+          .filter(Boolean)
+          .join('\n')
+          .split('\n')
+          .filter((line) => line.trim().length > 0)
+          .slice(-6)
+          .join('\n');
+
+        reject(
+          new Error(
+            said || `The speech engine exited with code ${code} and said nothing. Ran: ${ready.executable}`
+          )
+        );
         return;
       }
       resolve(out.replace(/\s+/g, ' ').trim());

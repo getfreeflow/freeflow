@@ -1,0 +1,37 @@
+name: Windows smoke test
+
+# Runs the speech pipeline on a real Windows machine and prints what it actually
+# does, because a Mac can't tell you why whisper.cpp exited with 1.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'windows/src/main/whisper.ts'
+      - 'windows/scripts/smoke-whisper.mjs'
+      - '.github/workflows/windows-smoke.yml'
+
+jobs:
+  whisper:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: windows/package-lock.json
+
+      - name: Install
+        working-directory: windows
+        run: npm ci
+
+      - name: Build
+        working-directory: windows
+        run: npm run build
+
+      - name: Speech pipeline
+        working-directory: windows
+        run: node scripts/smoke-whisper.mjs
