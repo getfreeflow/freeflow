@@ -1,0 +1,131 @@
+/* Windows has no notch, so FreeFlow draws one: a black shape that drops out of the
+   top edge of the screen, with the same concave shoulders and rounded bottom as the
+   Mac version's. Everything that lives in it is black like the notch, and surfaces
+   step up from it in small amounts so it stays calm rather than glowing. */
+
+:root {
+  --surface: #131313;
+  --surface-hover: #1c1c1c;
+  --surface-raised: #262626;
+  --hairline: rgba(255, 255, 255, 0.08);
+  --hairline-strong: rgba(255, 255, 255, 0.14);
+  --text: #f5f5f5;
+  --secondary: rgba(255, 255, 255, 0.58);
+  --tertiary: rgba(255, 255, 255, 0.42);
+  --live: #ff453a;
+  --good: #30d158;
+  --caution: #ffb340;
+  --shoulder: 8px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+html,
+body {
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+  cursor: default;
+}
+
+body {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+/* The shape itself. Width and height are driven from script; everything else is
+   fixed so the transition has only two things to animate. */
+.notch {
+  position: relative;
+  background: #000;
+  border-radius: 0 0 var(--radius, 16px) var(--radius, 16px);
+  width: var(--w, 180px);
+  height: var(--h, 0px);
+  overflow: hidden;
+  transition:
+    width 0.34s cubic-bezier(0.2, 0.9, 0.25, 1),
+    height 0.34s cubic-bezier(0.2, 0.9, 0.25, 1),
+    border-radius 0.34s ease;
+}
+
+/* Collapsing is quicker than opening, so it feels like it tucks away. */
+.notch.closing {
+  transition:
+    width 0.2s ease-in,
+    height 0.2s ease-in;
+}
+
+/* The flare where the shape meets the top edge. A quarter disc is cut out of each
+   little square with a radial gradient, which is what makes the corner concave. */
+.shoulder {
+  position: absolute;
+  top: 0;
+  width: var(--shoulder);
+  height: var(--shoulder);
+  pointer-events: none;
+}
+
+.shoulder.left {
+  right: 100%;
+  background: radial-gradient(circle at 0 100%, transparent var(--shoulder), #000 var(--shoulder));
+}
+
+.shoulder.right {
+  left: 100%;
+  background: radial-gradient(circle at 100% 100%, transparent var(--shoulder), #000 var(--shoulder));
+}
+
+.contents {
+  opacity: 0;
+  transition: opacity 0.16s ease-out 0.08s;
+  height: 100%;
+}
+
+.notch.open .contents {
+  opacity: 1;
+}
+
+/* Buttons */
+
+.circle-button {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  cursor: pointer;
+  transition:
+    transform 0.1s ease-out,
+    background 0.12s ease-out;
+}
+
+.circle-button.prominent {
+  background: #fff;
+  color: #000;
+}
+
+.circle-button:active {
+  transform: scale(0.92);
+}
+
+.icon {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}

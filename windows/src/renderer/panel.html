@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>FreeFlow</title>
+    <link rel="stylesheet" href="shared.css" />
+    <style>
+      .notch { width: var(--w, 180px); }
+
+      .band {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 32px;
+        padding: 0 12px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .mark { display: flex; align-items: center; gap: 1.6px; }
+      .mark i { display: block; width: 1.8px; border-radius: 1px; background: #fff; }
+
+      .pill {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        height: 20px;
+        padding: 0 8px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+        font-size: 11px;
+        font-weight: 500;
+        color: rgba(255, 255, 255, 0.82);
+      }
+
+      .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--tertiary); }
+
+      .body { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+
+      .status { display: flex; align-items: center; gap: 12px; }
+
+      .tile {
+        display: grid;
+        place-items: center;
+        width: 44px;
+        height: 44px;
+        border-radius: 12px;
+        background: var(--surface);
+        color: var(--secondary);
+        flex: none;
+      }
+
+      .headline { font-size: 14px; font-weight: 500; }
+      .subline { font-size: 12px; color: var(--secondary); margin-top: 4px; }
+
+      .keycap {
+        display: inline-flex;
+        align-items: center;
+        height: 21px;
+        padding: 0 7px;
+        margin: 0 2px;
+        border-radius: 6px;
+        background: var(--surface-raised);
+        border: 1px solid var(--hairline-strong);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .stats {
+        display: flex;
+        border-radius: 14px;
+        background: var(--surface);
+        padding: 12px 0;
+      }
+
+      .stat { flex: 1; text-align: center; }
+      .stat b { display: block; font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+      .stat span { font-size: 11px; color: var(--secondary); }
+      .stat + .stat { border-left: 1px solid var(--hairline); }
+
+      .section-head {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .count { font-size: 12px; color: var(--tertiary); font-variant-numeric: tabular-nums; }
+
+      .spacer { flex: 1; }
+
+      .list { display: flex; flex-direction: column; gap: 6px; max-height: 150px; overflow-y: auto; }
+      .list::-webkit-scrollbar { width: 0; }
+
+      .entry {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 8px 10px;
+        border-radius: 12px;
+        background: var(--surface);
+      }
+
+      .entry:hover { background: var(--surface-hover); }
+      .entry .text { font-size: 12.5px; line-height: 1.35; -webkit-user-select: text; user-select: text; }
+      .entry .meta { font-size: 11px; color: var(--tertiary); margin-top: 3px; }
+      .entry .actions { display: none; gap: 2px; flex: none; }
+      .entry:hover .actions { display: flex; }
+
+      .empty { font-size: 12px; color: var(--secondary); padding: 6px 0; }
+
+      .ghost {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        padding: 0 10px;
+        border: 0;
+        border-radius: 9px;
+        background: transparent;
+        color: var(--secondary);
+        font-family: inherit;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+
+      .ghost:hover { background: rgba(255, 255, 255, 0.07); color: var(--text); }
+      .ghost.small { height: 22px; padding: 0 8px; font-size: 11.5px; border-radius: 7px; }
+      .ghost.square { width: 24px; height: 24px; padding: 0; justify-content: center; border-radius: 7px; }
+
+      .footer {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        padding: 8px;
+        border-top: 1px solid var(--hairline);
+      }
+
+      .settings { display: flex; flex-direction: column; gap: 10px; }
+
+      .field {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 12.5px;
+      }
+
+      .field small { display: block; color: var(--secondary); font-size: 11px; margin-top: 2px; }
+
+      select,
+      input[type='password'],
+      input[type='text'] {
+        height: 28px;
+        padding: 0 8px;
+        border-radius: 8px;
+        border: 1px solid var(--hairline-strong);
+        background: var(--surface);
+        color: var(--text);
+        font-family: inherit;
+        font-size: 12px;
+        -webkit-user-select: text;
+        user-select: text;
+      }
+
+      input[type='checkbox'] { accent-color: #fff; width: 15px; height: 15px; }
+
+      .banner {
+        display: flex;
+        gap: 8px;
+        padding: 10px;
+        border-radius: 12px;
+        font-size: 11.5px;
+        line-height: 1.35;
+      }
+
+      .banner.caution { background: rgba(255, 179, 64, 0.12); color: var(--caution); }
+    </style>
+  </head>
+  <body>
+    <div class="notch" id="notch">
+      <div class="shoulder left"></div>
+      <div class="shoulder right"></div>
+
+      <div class="contents">
+        <div class="band">
+          <div class="brand">
+            <span class="mark" id="mark"></span>
+            FreeFlow
+          </div>
+          <div class="pill"><span class="dot" id="pillDot"></span><span id="pillText">Idle</span></div>
+        </div>
+
+        <div class="body" id="body"></div>
+      </div>
+    </div>
+
+    <script src="icons.js"></script>
+    <script src="panel.js"></script>
+  </body>
+</html>

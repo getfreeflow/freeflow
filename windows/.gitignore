@@ -1,0 +1,7 @@
+node_modules/
+
+# Compiled TypeScript
+dist/
+
+# electron-builder output
+dist_electron/
