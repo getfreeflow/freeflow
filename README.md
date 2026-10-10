@@ -57,11 +57,12 @@ git clone https://github.com/getfreeflow/freeflow.git
 ```
 
 ```bash
-cd freeflow && xcodegen generate && open FreeFlow.xcodeproj
+cd freeflow && ./install.sh
 ```
 
-Press Run, then drag the built app to `/Applications`. The `.xcodeproj` is generated rather
-than committed, so the checkout stays clean.
+That generates the project, builds it, copies the app to `/Applications` and opens it. The
+`.xcodeproj` is generated rather than committed, so the checkout stays clean. To work on the
+code instead, `xcodegen generate && open FreeFlow.xcodeproj` and press Run.
 
 ## Making permissions stick
 
@@ -220,10 +221,10 @@ requires a paid Apple Developer account for notarization, and this project doesn
 brew install xcodegen
 ```
 
-**2. Get the code and generate the project.**
+**2. Get the code.**
 
 ```bash
-git clone https://github.com/getfreeflow/freeflow.git && cd freeflow && xcodegen generate
+git clone https://github.com/getfreeflow/freeflow.git && cd freeflow
 ```
 
 **3. Set up a signing certificate.** Optional, but do it now rather than later. Without it
@@ -231,24 +232,18 @@ macOS forgets your permissions every time you rebuild. The commands are in
 [Making permissions stick](#making-permissions-stick) above. Skip only if you plan to build
 once and never touch it again.
 
-**4. Build.**
+**4. Build and install.**
 
 ```bash
-open FreeFlow.xcodeproj
+./install.sh
 ```
 
-Press the Run button (or ⌘R). The first build downloads WhisperKit and takes a few minutes.
-Later builds are quick.
+This builds the app, copies it to `/Applications` and opens it. The first build downloads
+WhisperKit and takes a few minutes. Later builds are quick.
 
-**5. Move it to Applications.** The app that Xcode built is buried in DerivedData. Put it
-somewhere permanent, which is also required for launch-at-login to work:
-
-```bash
-cp -R ~/Library/Developer/Xcode/DerivedData/FreeFlow-*/Build/Products/Debug/FreeFlow.app /Applications/
-```
-
-Then open it from `/Applications`, not from Xcode. macOS assigns permissions per app location,
-so grants made to the Xcode-run copy won't follow it.
+**5. Open it from `/Applications` from then on,** not from Xcode. macOS assigns permissions
+per app location, so grants made to a copy run from Xcode won't follow it, and
+launch-at-login only works from there.
 
 **6. Free up the `fn` key.** macOS assigns it to Dictation or Emoji by default and that
 assignment wins over anything this app does:
@@ -271,6 +266,10 @@ mode is unavailable.
 Then hold your trigger key and talk.
 
 ### If something doesn't work
+
+**The last step opened a folder instead of an app.** You ran `open FreeFlow.xcodeproj` on a
+Mac without Xcode. A project is a folder on disk, and only Xcode teaches Finder to treat it
+as anything else. Install Xcode from the App Store, open it once, then run `./install.sh`.
 
 **The key does nothing.** Input Monitoring isn't granted, or `fn` is still bound to Dictation
 in System Settings. The app's dashboard shows which permission is missing.
