@@ -72,8 +72,10 @@ try {
   console.log(`   ${(fs.statSync(wav).size / 1024).toFixed(0)} KB\n`);
 
   console.log('== transcribing ==');
+  const started = Date.now();
   const text = await whisper.transcribe(wav);
-  console.log(`   "${text}"\n`);
+  console.log(`   "${text}"`);
+  console.log(`   ${((Date.now() - started) / 1000).toFixed(1)}s for 11s of speech on ${os.cpus().length} cores\n`);
 
   if (!/ask not what your country/i.test(text)) {
     console.log('!! transcript does not match the sample');

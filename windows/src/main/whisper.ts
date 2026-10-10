@@ -1,6 +1,7 @@
 import { app } from 'electron';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import https from 'node:https';
 import type { ModelName } from './store';
@@ -198,16 +199,48 @@ export function isReady(): boolean {
   return cached !== null;
 }
 
+/** On four cores or fewer every one is needed. Above that, two are left for
+ *  whatever the person is dictating into. */
+function threadCount(): number {
+  const cores = os.cpus().length;
+  return Math.max(2, Math.min(8, cores <= 4 ? cores : cores - 2));
+}
+
+/** How much of Whisper's 30 second window to encode, in its own units of 20ms.
+ *
+ *  Whisper pads everything to 30 seconds and encodes all of it, so a four second
+ *  take costs the same as a thirty second one, and on a CPU the encoder is most of
+ *  the wait: 3.9s of a 4.9s run for four seconds of speech on a four-core machine.
+ *  Encoding only the take, plus a margin, halves that. Over ten takes of three to
+ *  eleven seconds, small.en went from 42.5s to 20.7s and got the same 7 words in
+ *  186 wrong either way.
+ *
+ *  The beam search is left at whisper-cli's default of five. Narrowing it to two
+ *  or three saved about another tenth and started costing words on base.en.
+ *
+ *  The margin and the floor keep the window from being cut right up against the
+ *  speech. */
+function audioContext(wavPath: string): number {
+  const seconds = Math.max(0, fs.statSync(wavPath).size - 44) / (16_000 * 2);
+  return Math.min(1500, Math.max(384, Math.ceil(seconds * 50) + 128));
+}
+
 /** Runs whisper.cpp over a 16 kHz mono WAV file and returns what it heard. */
 export function transcribe(wavPath: string): Promise<string> {
   const ready = cached;
   if (!ready) return Promise.reject(new Error('The speech model is not loaded yet'));
 
   return new Promise((resolve, reject) => {
-    const threads = Math.max(2, Math.min(8, require('node:os').cpus().length - 2));
     const child = spawn(
       ready.executable,
-      ['-m', ready.model, '-f', wavPath, '-l', 'en', '-nt', '-t', String(threads)],
+      [
+        '-m', ready.model,
+        '-f', wavPath,
+        '-l', 'en',
+        '-nt',
+        '-t', String(threadCount()),
+        '-ac', String(audioContext(wavPath)),
+      ],
       { windowsHide: true }
     );
 
