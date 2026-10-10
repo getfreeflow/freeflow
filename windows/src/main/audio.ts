@@ -100,6 +100,11 @@ export class Recorder {
     return file;
   }
 
+  /** Whether anything above the noise floor has arrived during this take. */
+  get hasHeardSpeech(): boolean {
+    return this.heardSpeech;
+  }
+
   get durationSeconds(): number {
     return this.chunks.reduce((sum, chunk) => sum + chunk.length, 0) / SAMPLE_RATE;
   }

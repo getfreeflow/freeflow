@@ -11,11 +11,16 @@ let shell: ChildProcessWithoutNullStreams | null = null;
 let buffer = '';
 let pending: ((value: string) => void) | null = null;
 
-const DECLARE = `Add-Type -Namespace Win -Name Api -MemberDefinition '
-[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-[DllImport("user32.dll")] public static extern int GetWindowThreadProcessId(IntPtr h, out int pid);
-'
-`;
+/// One line, and it has to be. PowerShell reading commands from stdin treats a
+/// statement that spans lines the way its prompt does: it waits for a blank line
+/// before running any of it, and swallows every command sent after. Spread over
+/// three lines, this declaration left the shell waiting forever and every lookup
+/// timed out to "Windows".
+const DECLARE =
+  'Add-Type -Namespace Win -Name Api -MemberDefinition \'' +
+  '[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); ' +
+  '[DllImport("user32.dll")] public static extern int GetWindowThreadProcessId(IntPtr h, out int pid);' +
+  '\'\n';
 
 function shellProcess(): ChildProcessWithoutNullStreams {
   if (shell && !shell.killed) return shell;
@@ -67,7 +72,8 @@ export async function foregroundApp(): Promise<ForegroundApp> {
       new Promise<string>((resolve) => {
         pending = resolve;
         shellProcess().stdin.write(
-          '$h=[Win.Api]::GetForegroundWindow(); [void][Win.Api]::GetWindowThreadProcessId($h,[ref]$p);' +
+          // [ref] refuses a variable that doesn't exist yet, hence the $p=0.
+          '$p=0; $h=[Win.Api]::GetForegroundWindow(); [void][Win.Api]::GetWindowThreadProcessId($h,[ref]$p);' +
             '$proc=Get-Process -Id $p -ErrorAction SilentlyContinue;' +
             'Write-Output ("{0}|{1}" -f ($proc.ProcessName + ".exe"), $proc.MainWindowTitle)\n'
         );

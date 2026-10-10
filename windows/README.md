@@ -108,9 +108,10 @@ straight after. Nothing else touches the disk.
 
 ## Known limitations
 
-- **Text insertion uses the clipboard.** Your clipboard is restored about 600ms after
-  the paste. Windows has no equivalent of the Accessibility write the Mac build tries
-  first, short of a native UI Automation addon.
+- **Text insertion uses the clipboard, and the dictation stays on it.** Whatever you
+  had copied before is replaced. If a paste ever misses, Ctrl+V puts the text where
+  you wanted it. Windows has no equivalent of the Accessibility write the Mac build
+  tries first, short of a native UI Automation addon.
 - **Apps running as administrator do not receive the paste.** A normal process cannot
   send keystrokes to an elevated window. Run FreeFlow as administrator too if you need
   this, with the usual caveats.

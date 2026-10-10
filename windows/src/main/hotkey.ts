@@ -17,8 +17,13 @@ import { uIOhook } from 'uiohook-napi';
 
 const SOLO_HOLD_MS = 120;
 const ESCAPE_KEYCODE = 1;
+/// What the hook reports for a key with no scancode of its own, which is what the
+/// menu mask in inject.ts sends. It is our own keystroke, not a chord.
+const UNDEFINED_KEYCODE = 0;
 
 export interface HotkeyHandlers {
+  /** The trigger has physically gone down, before it is known to be a press. */
+  onDown: (keycode: number) => void;
   onPress: () => void;
   /** With how long the key was physically held, so the caller can tell a tap from a hold. */
   onRelease: (heldMs: number) => void;
@@ -71,6 +76,8 @@ export class HotkeyMonitor {
   }
 
   private handleDown = (event: { keycode: number }): void => {
+    if (event.keycode === UNDEFINED_KEYCODE) return;
+
     if (event.keycode === ESCAPE_KEYCODE) {
       this.handlers.onEscape();
       return;
@@ -92,11 +99,13 @@ export class HotkeyMonitor {
 
     this.chordDetected = false;
     this.pendingSince = Date.now();
+    this.handlers.onDown(this.triggerKeycode);
     this.pendingTimer = setTimeout(() => {
       this.pendingTimer = null;
       if (this.pendingSince === 0 || this.chordDetected) return;
       this.activeSince = this.pendingSince;
       this.pendingSince = 0;
+      this.handlers.onDown(this.triggerKeycode);
       this.handlers.onPress();
     }, SOLO_HOLD_MS);
   };
@@ -139,7 +148,9 @@ export function captureNextKey(timeoutMs = 5000): Promise<{ keycode: number } | 
       resolve(result);
     };
 
-    const listener = (event: { keycode: number }): void => finish({ keycode: event.keycode });
+    const listener = (event: { keycode: number }): void => {
+      if (event.keycode !== UNDEFINED_KEYCODE) finish({ keycode: event.keycode });
+    };
     const timer = setTimeout(() => finish(null), timeoutMs);
 
     uIOhook.on('keydown', listener);

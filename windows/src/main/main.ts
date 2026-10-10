@@ -252,6 +252,28 @@ function triggerDown(): void {
   void beginRecording();
 }
 
+/** The trigger has physically gone down. It isn't a press yet: the monitor is
+ *  still waiting to see whether it is a chord. */
+function triggerTouched(keycode: number): void {
+  inject.maskMenuKey(keycode);
+
+  // A second tap only registers once the monitor is sure of it, up to 120ms after
+  // the finger lands. Measured from there, an unhurried double tap ran out the
+  // clock, got thrown away, and started a fresh take that was thrown away too.
+  // The finger landing in time is what counts, so the clock restarts here.
+  if (phase === 'recording' && awaitingSecondTap) armSecondTapWait();
+}
+
+function armSecondTapWait(): void {
+  awaitingSecondTap = true;
+  if (secondTapTimer) clearTimeout(secondTapTimer);
+  secondTapTimer = setTimeout(() => {
+    if (!awaitingSecondTap) return;
+    awaitingSecondTap = false;
+    discardTake();
+  }, DOUBLE_TAP_MS);
+}
+
 function triggerUp(heldMs: number): void {
   if (phase !== 'recording') return;
   if (ignoreNextRelease) {
@@ -263,13 +285,7 @@ function triggerUp(heldMs: number): void {
   if (heldMs < TAP_MAX_MS) {
     // Maybe the first half of a double tap. Keep recording, and give up if no
     // second tap arrives.
-    awaitingSecondTap = true;
-    if (secondTapTimer) clearTimeout(secondTapTimer);
-    secondTapTimer = setTimeout(() => {
-      if (!awaitingSecondTap) return;
-      awaitingSecondTap = false;
-      discardTake();
-    }, DOUBLE_TAP_MS);
+    armSecondTapWait();
   } else {
     void finish(true);
   }
@@ -283,7 +299,8 @@ function latch(): void {
   if (latchWatchdog) clearTimeout(latchWatchdog);
   latchWatchdog = setTimeout(() => {
     // Never heard anything, which is what an accidental double tap looks like.
-    if (phase === 'recording' && latched) discardTake();
+    // A take with speech in it is left alone however long it runs.
+    if (phase === 'recording' && latched && !recorder.hasHeardSpeech) discardTake();
   }, SILENT_LATCH_MS);
   broadcast();
 }
@@ -589,6 +606,7 @@ if (!app.requestSingleInstanceLock()) {
 
     const settings = store.settings();
     hotkey = new HotkeyMonitor(settings.triggerKeycode, {
+      onDown: (keycode) => triggerTouched(keycode),
       onPress: () => triggerDown(),
       onRelease: (heldMs) => triggerUp(heldMs),
       onEscape: () => discardTake(),

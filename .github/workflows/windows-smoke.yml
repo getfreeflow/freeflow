@@ -1,14 +1,17 @@
 name: Windows smoke test
 
-# Runs the speech pipeline on a real Windows machine and prints what it actually
-# does, because a Mac can't tell you why whisper.cpp exited with 1.
+# Runs the speech pipeline and the keystroke plumbing on a real Windows machine and
+# prints what they actually do, because a Mac can't tell you why whisper.cpp exited
+# with 1, or that a tap of Right Alt sent the paste into a menu bar.
 
 on:
   workflow_dispatch:
   push:
     paths:
       - 'windows/src/main/whisper.ts'
-      - 'windows/scripts/smoke-whisper.mjs'
+      - 'windows/src/main/inject.ts'
+      - 'windows/src/main/foreground.ts'
+      - 'windows/scripts/smoke-*'
       - '.github/workflows/windows-smoke.yml'
 
 jobs:
@@ -35,3 +38,7 @@ jobs:
       - name: Speech pipeline
         working-directory: windows
         run: node scripts/smoke-whisper.mjs
+
+      - name: Paste and foreground app
+        working-directory: windows
+        run: node scripts/smoke-keys.mjs
